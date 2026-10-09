@@ -985,6 +985,15 @@ function usuario_() {
   return { email: email, rol: null };
 }
 
+/**
+ * Las funciones globales sin «_» al final las puede invocar desde el navegador cualquiera que abra la aplicación.
+ * Las de mantenimiento solo corren desde el editor o un activador (sin correo identificable) o para un administrador.
+ */
+function exigirAdminOEditor_() {
+  var u = usuario_();
+  if (u.email && u.rol !== 'admin') throw new Error('Solo los administradores pueden ejecutar esto.');
+}
+
 function nucleo_() {
   var p = propiedades_().getProperties();
   if (!p.ID_BASE || !p.ID_FOTOS) throw new ErrorHttp(500, 'La plataforma no está configurada: ejecute «configurar» en el editor de Apps Script.');
@@ -1052,6 +1061,7 @@ function llamar(texto) {
 // ───────────────────────── Instalación ─────────────────────────
 /** Ejecútela UNA vez desde el editor: crea la base de datos y la carpeta de fotos, y prepara permisos y enlaces. */
 function configurar() {
+  exigirAdminOEditor_();
   var props = propiedades_(), actuales = props.getProperties(), informe = [];
   var dueno = String(Session.getEffectiveUser().getEmail() || '').toLowerCase();
   if (!actuales.ID_BASE) {
@@ -1137,6 +1147,7 @@ function candidatos_(consulta, filtro) {
  * (instale el script con siau@miredips.org) y guarda sus ID. No pisa lo ya configurado.
  */
 function autoconfigurar() {
+  exigirAdminOEditor_();
   var props = propiedades_(), actuales = props.getProperties(), informe = [];
   BUSQUEDAS.forEach(function (b) {
     if (actuales[b[0]]) { informe.push(b[0] + ': ya configurado'); return; }
@@ -1226,6 +1237,7 @@ function sincronizarDriveCon_(nucleo) {
 
 /** La ejecuta el activador diario (y también se puede ejecutar a mano). */
 function sincronizarDrive() {
+  exigirAdminOEditor_();
   var bloqueo = LockService.getScriptLock();
   bloqueo.waitLock(30000);
   try {
@@ -1240,18 +1252,40 @@ function sincronizarDrive() {
 
 /** Programa la sincronización todos los días a las 6 a. m. */
 function instalarActivadorDiario() {
+  exigirAdminOEditor_();
   ScriptApp.getProjectTriggers().forEach(function (t) { if (t.getHandlerFunction() === 'sincronizarDrive') ScriptApp.deleteTrigger(t); });
   ScriptApp.newTrigger('sincronizarDrive').timeBased().everyDays(1).atHour(6).create();
 }
 
 /** Muestra en el registro cómo quedó la instalación (sin datos personales). */
 function diagnosticar() {
+  exigirAdminOEditor_();
   var p = propiedades_().getProperties(), s = [];
   ['ID_BASE', 'ID_FOTOS', 'ID_CHARLAS', 'ID_BUZON', 'ID_NPS', 'ID_MEDICA', 'ID_ILSC', 'CARPETA_HORARIOS'].forEach(function (k) { s.push(k + ': ' + (p[k] ? 'configurado' : 'FALTA')); });
   s.push('ADMINS: ' + listaCorreos_('ADMINS').length + ' correo(s) · VISORES: ' + listaCorreos_('VISORES').length + ' correo(s)');
   s.push('Recursos de la interfaz: ' + (p.RECURSOS || RECURSOS_POR_DEFECTO));
   s.push('Activadores: ' + ScriptApp.getProjectTriggers().length);
   s.push('Dirección de la web app: ' + ScriptApp.getService().getUrl());
+  console.log(s.join('\n'));
+  return s;
+}
+
+/**
+ * Ejecútela PRIMERO desde el editor. Dice con qué cuenta corre el código y si puede abrir la base de datos.
+ * Si muestra una cuenta personal: cierre todo y repita en una ventana de incógnito con solo siau@miredips.org.
+ */
+function verificarCuenta() {
+  var activa = '', efectiva = '';
+  try { activa = String(Session.getActiveUser().getEmail() || ''); } catch (e) { activa = '(no disponible)'; }
+  try { efectiva = String(Session.getEffectiveUser().getEmail() || ''); } catch (e) { efectiva = '(no disponible)'; }
+  var s = ['Cuenta activa: ' + (activa || '(vacía)'), 'Cuenta que ejecuta el código: ' + (efectiva || '(vacía)')];
+  var id = propiedades_().getProperty('ID_BASE');
+  if (!id) s.push('Aún no se ha ejecutado «configurar».');
+  else {
+    try { SpreadsheetApp.openById(id).getName(); s.push('✔ Abre la base de datos.'); }
+    catch (e) { s.push('✘ No abre la base de datos: ' + e.message + ' (probablemente se está usando otra cuenta).'); }
+  }
+  s.push(/@miredips\.org$/i.test(efectiva) ? '✔ La cuenta es institucional.' : '✘ La cuenta NO es de miredips.org: cree el proyecto y la implementación desde siau@miredips.org.');
   console.log(s.join('\n'));
   return s;
 }

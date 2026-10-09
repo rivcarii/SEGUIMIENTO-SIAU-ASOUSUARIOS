@@ -6,7 +6,13 @@
   "description": "Visor + administrador de evidencias (SIAU y Asociación de Usuarios) como aplicación web de Google Apps Script. Sin dependencias.",
   "scripts": {
     "construir": "node google/construir.mjs",
-    "test": "node --test test/*.test.mjs"
+    "test": "node --test test/*.test.mjs",
+    "push": "npm run construir && npm test && clasp push"
   },
-  "engines": { "node": ">=22.13" }
+  "engines": {
+    "node": ">=22.13"
+  },
+  "devDependencies": {
+    "@google/clasp": "^3.4.1"
+  }
 }

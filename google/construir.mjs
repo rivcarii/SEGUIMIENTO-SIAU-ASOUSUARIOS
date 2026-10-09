@@ -28,5 +28,6 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   mkdirSync(join(RAIZ, "dist"), { recursive: true });
   const codigo = construir();
   writeFileSync(join(RAIZ, "dist/Codigo.gs"), codigo);
+  writeFileSync(join(RAIZ, "dist/appsscript.json"), leer("google/appsscript.json"));
   console.log(`dist/Codigo.gs generado (${(codigo.length / 1024).toFixed(0)} KB)`);
 }

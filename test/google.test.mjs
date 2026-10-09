@@ -229,3 +229,11 @@ test("activador diario: se instala una sola vez", () => {
   assert.equal(e.triggers.length, 1);
   assert.equal(e.triggers[0].getHandlerFunction(), "sincronizarDrive");
 });
+
+test("mantenimiento: un visor no puede ejecutar funciones de administración desde el navegador; verificarCuenta informa la cuenta", () => {
+  const base = entorno(); base.ctx.configurar();
+  const e = entorno({ usuario: "lector@miredips.org", props: { ...base.propiedades, VISORES: "lector@miredips.org" } });
+  for (const fn of ["configurar", "autoconfigurar", "sincronizarDrive", "instalarActivadorDiario", "diagnosticar"]) assert.throws(() => e.ctx[fn](), /administradores/, fn);
+  const v = base.ctx.verificarCuenta();
+  assert.ok(v.some((l) => /siau@miredips\.org/.test(l)) && v.some((l) => /✔ La cuenta es institucional/.test(l)));
+});

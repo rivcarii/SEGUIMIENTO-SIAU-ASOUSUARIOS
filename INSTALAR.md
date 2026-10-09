@@ -1,6 +1,13 @@
 # Instalación (≈ 10 minutos, sin instalar nada)
 
-Todo corre dentro de Google con la cuenta **siau@miredips.org**: no hay servidor, claves ni contraseñas que crear.
+Todo corre dentro de Google con la cuenta **siau@miredips.org**: no hay servidor, claves ni contraseñas que crear. Es un proyecto **interno** (solo Calidad/SIAU): entra gente con correo @miredips.org que esté en `ADMINS`/`VISORES`.
+
+## ⚠ Antes de empezar: use SOLO la cuenta de MiRed
+Si el navegador tiene varias cuentas de Google abiertas, Google usa la **personal** en el editor y en la implementación, y aparecen errores como «No cuentas con el permiso necesario…» o «Sin acceso».
+1. Abra una **ventana de incógnito** (Ctrl+Shift+N) e inicie sesión **solo** con siau@miredips.org.
+2. Haga todo lo de abajo en esa ventana.
+3. Ejecute **`verificarCuenta`**: debe decir «✔ La cuenta es institucional». Si no, cierre todo y repita el paso 1.
+4. Si ya hizo una implementación con otra cuenta, archívela y cree una nueva desde siau.
 
 ## 1. Publicar la interfaz (una sola vez, la hace quien administra el repositorio)
 GitHub → **Settings → Pages → Build and deployment → Source: GitHub Actions**. Luego ejecute el flujo «Publicar interfaz (GitHub Pages)» (Actions → Run workflow). Debe quedar en `https://rivcarii.github.io/SEGUIMIENTO-SIAU-ASOUSUARIOS/`.
@@ -45,3 +52,13 @@ Pegue el nuevo `dist/Codigo.gs`, luego **Implementar → Administrar implementac
 ## Diagnóstico
 Ejecute **`diagnosticar`**: lista qué está configurado, cuántos activadores hay y la URL.
 Si el administrador muestra «No se pudo abrir», revise que la implementación sea «Ejecutar como yo» y que el usuario esté en `ADMINS`/`VISORES`.
+
+## Alternativa: enlazar con GitHub (clasp), como el proyecto de PQRS
+Evita copiar y pegar. Desde su computador, en la carpeta del repositorio:
+```
+npm install
+npx clasp login                      # en incógnito, con siau@miredips.org; antes active la API en https://script.google.com/home/usersettings
+cp .clasp.json.example .clasp.json   # pegue el ID de secuencia de comandos (⚙ Configuración del proyecto)
+npm run push                         # construye, prueba y sube dist/ al proyecto
+```
+Luego, **Implementar → Administrar implementaciones → ✏ → Versión nueva**. `.clasp.json` no se sube a GitHub.
