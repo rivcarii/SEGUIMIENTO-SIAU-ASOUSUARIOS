@@ -237,3 +237,20 @@ test("mantenimiento: un visor no puede ejecutar funciones de administración des
   const v = base.ctx.verificarCuenta();
   assert.ok(v.some((l) => /siau@miredips\.org/.test(l)) && v.some((l) => /✔ La cuenta es institucional/.test(l)));
 });
+
+test("configurar carga la rotación de los 15 SIAU y, si la base venía de la versión 1, la agrega sin duplicar", () => {
+  const e = entorno();
+  e.ctx.configurar();
+  const base = e.hojasPorLibro.get(e.propiedades.ID_BASE);
+  assert.equal(e.llamar("GET", "/api/config").datos.tecnicos.filter((t) => t.activo).length, 15);
+  // simula una base creada con la versión anterior: sin técnicos y con version_datos = 1
+  base.getSheetByName("t_tecnicos").datos = [["id", "json"]];
+  base.getSheetByName("t_asignaciones").datos = [["id", "json"]];
+  const aj = base.getSheetByName("t_ajustes");
+  aj.datos = aj.datos.map((f) => (String(f[1]).includes("version_datos") ? [f[0], JSON.stringify({ id: "version_datos", valor: "1" })] : f));
+  // solo con abrir la plataforma, la base antigua se actualiza sola
+  assert.equal(e.llamar("GET", "/api/config").datos.tecnicos.length, 15);
+  e.ctx.configurar(); e.ctx.configurar();
+  assert.equal(e.llamar("GET", "/api/config").datos.tecnicos.length, 15);
+  assert.equal(e.llamar("GET", "/api/cumplimiento", { q: { mes: "2026-09" } }).datos.siau.sin_cobertura.length, 0);
+});

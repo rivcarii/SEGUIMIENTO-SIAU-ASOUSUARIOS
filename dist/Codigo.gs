@@ -875,7 +875,7 @@ function crearNucleo({ almacen, fotos, hoy = () => new Date().toLocaleDateString
 return { VERSION_DATOS, ErrorHttp, inicializar, crearNucleo };
 })();
 
-const { ErrorHttp, crearNucleo, inicializar } = M_api;
+const { ErrorHttp, crearNucleo, inicializar, VERSION_DATOS } = M_api;
 
 const PLANTILLA_VISOR = "<!doctype html>\n<html lang=\"es\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1,viewport-fit=cover\">\n<title>Evidencias SIAU</title><base target=\"_top\"><link rel=\"icon\" href=\"{{R}}/shared/marca/medalla.png\"><link rel=\"stylesheet\" href=\"{{R}}/shared/estilos.css\"></head>\n<body class=\"tiene-tabbar\">\n<script>window.PLATAFORMA = { base: \"{{R}}\", app: \"{{APP}}\" };</script>\n<div class=\"fondo\" aria-hidden=\"true\"></div>\n<header class=\"nav glass\" id=\"nav\"><div class=\"logos\" id=\"logos\"></div><span class=\"nav-titulo\"></span><a id=\"irAdmin\" href=\"{{APP}}?pagina=admin\" target=\"_top\" hidden>Administrar</a></header>\n<main id=\"app\"></main>\n<nav class=\"tabbar glass\" id=\"tabbar\" aria-label=\"Módulos\" hidden></nav>\n<dialog id=\"dlg\"><div class=\"in\" id=\"dlgc\"></div></dialog>\n<script type=\"module\" src=\"{{R}}/visor/app.js\"></script>\n</body></html>\n";
 const PLANTILLA_ADMIN = "<!doctype html>\n<html lang=\"es\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1,viewport-fit=cover\">\n<title>Administrador de evidencias</title><base target=\"_top\"><link rel=\"icon\" href=\"{{R}}/shared/marca/medalla.png\"><link rel=\"stylesheet\" href=\"{{R}}/shared/estilos.css\"></head>\n<body>\n<script>window.PLATAFORMA = { base: \"{{R}}\", app: \"{{APP}}\" };</script>\n<div class=\"fondo\" aria-hidden=\"true\"></div>\n<header class=\"nav glass\" id=\"nav\"><div class=\"logos\" id=\"logos\"></div><span class=\"nav-titulo\"></span><a href=\"{{APP}}\" target=\"_top\">Ver visor</a></header>\n<main id=\"app\"></main>\n<script type=\"module\" src=\"{{R}}/admin/app.js\"></script>\n</body></html>\n";
@@ -1045,10 +1045,23 @@ function exigirAdminOEditor_() {
   if (u.email && u.rol !== 'admin') throw new Error('Solo los administradores pueden ejecutar esto.');
 }
 
+var BLOQUEADO_ = false; // true mientras esta ejecución ya tiene el candado del script
+
+/** Si la base viene de una versión anterior (p. ej. sin la rotación de los SIAU), la actualiza sola al primer uso. */
+function asegurarVersion_(almacen) {
+  var v = almacen.tabla('ajustes').todos().filter(function (a) { return a.id === 'version_datos'; })[0];
+  if (v && v.valor === String(VERSION_DATOS)) return;
+  var bloqueo = null;
+  if (!BLOQUEADO_) { bloqueo = LockService.getScriptLock(); bloqueo.waitLock(30000); }
+  try { inicializar(almacen); almacen.guardar(); }
+  finally { if (bloqueo) bloqueo.releaseLock(); }
+}
+
 function nucleo_() {
   var p = propiedades_().getProperties();
   if (!p.ID_BASE || !p.ID_FOTOS) throw new ErrorHttp(500, 'La plataforma no está configurada: ejecute «configurar» en el editor de Apps Script.');
   var almacen = crearAlmacenHojas(SpreadsheetApp.openById(p.ID_BASE));
+  asegurarVersion_(almacen);
   return { almacen: almacen, nucleo: crearNucleo({ almacen: almacen, fotos: crearFotosDrive(p.ID_FOTOS), hoy: hoyBogota_, ahora: ahoraBogota_ }) };
 }
 
@@ -1089,7 +1102,7 @@ function llamar(texto) {
     if (!req || typeof req.ruta !== 'string' || typeof req.metodo !== 'string') throw new ErrorHttp(400, 'Solicitud inválida');
     var u = usuario_();
     var escribe = req.metodo !== 'GET';
-    if (escribe) { bloqueo = LockService.getScriptLock(); bloqueo.waitLock(30000); }
+    if (escribe) { bloqueo = LockService.getScriptLock(); bloqueo.waitLock(30000); BLOQUEADO_ = true; }
     var x = nucleo_();
     var datos;
     if (req.metodo === 'POST' && req.ruta === '/api/admin/sincronizar-drive') {
@@ -1105,7 +1118,7 @@ function llamar(texto) {
     if (!(e instanceof ErrorHttp)) console.error(e && e.stack ? e.stack : e);
     return JSON.stringify({ ok: false, estado: estado, error: e instanceof ErrorHttp ? e.message : 'Error interno: ' + (e && e.message ? e.message : e) });
   } finally {
-    if (bloqueo) bloqueo.releaseLock();
+    if (bloqueo) { bloqueo.releaseLock(); BLOQUEADO_ = false; }
   }
 }
 
@@ -1291,6 +1304,7 @@ function sincronizarDrive() {
   exigirAdminOEditor_();
   var bloqueo = LockService.getScriptLock();
   bloqueo.waitLock(30000);
+  BLOQUEADO_ = true;
   try {
     var x = nucleo_();
     var r = sincronizarDriveCon_(x.nucleo);
@@ -1298,7 +1312,7 @@ function sincronizarDrive() {
     console.log(r.informe.concat(r.errores.map(function (e) { return 'ERROR · ' + e; })).join('\n'));
     if (r.errores.length) throw new Error(r.errores.join('\n')); // así Google avisa por correo cuando el activador falla
     return r.informe;
-  } finally { bloqueo.releaseLock(); }
+  } finally { bloqueo.releaseLock(); BLOQUEADO_ = false; }
 }
 
 /** Programa la sincronización todos los días a las 6 a. m. */

@@ -18,7 +18,7 @@ export function construir() {
     if (/^\s*(import|export)\b/m.test(src)) throw new Error(`nucleo/${m}.mjs usa una forma de import/export que el empaquetador no entiende`);
     partes.push(`const M_${m} = (() => {\n${src}\nreturn { ${exportados.join(", ")} };\n})();\n`);
   }
-  partes.push(`const { ErrorHttp, crearNucleo, inicializar } = M_api;\n`);
+  partes.push(`const { ErrorHttp, crearNucleo, inicializar, VERSION_DATOS } = M_api;\n`);
   partes.push(`const PLANTILLA_VISOR = ${JSON.stringify(leer("web/visor/index.html"))};\nconst PLANTILLA_ADMIN = ${JSON.stringify(leer("web/admin/index.html"))};\n`);
   partes.push(leer("google/Capa.gs"));
   return partes.join("\n");
