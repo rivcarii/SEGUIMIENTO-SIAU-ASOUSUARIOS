@@ -6,14 +6,14 @@ import { fileURLToPath } from "node:url";
 
 const RAIZ = join(dirname(fileURLToPath(import.meta.url)), "..");
 const leer = (r) => readFileSync(join(RAIZ, r), "utf8");
-const MODULOS = ["sedes", "lib", "consolidados", "analisis", "rotacion", "api"]; // en orden de dependencia (almacen.mjs es solo para pruebas)
+const MODULOS = ["sedes", "lib", "consolidados", "analisis", "rotacion", "analitica", "api"]; // en orden de dependencia (almacen.mjs es solo para pruebas)
 
 export function construir() {
   const partes = [`// ARCHIVO GENERADO por google/construir.mjs — no lo edite aquí: edite nucleo/ o google/Capa.gs y vuelva a construir.\n`];
   for (const m of MODULOS) {
     let src = leer(`nucleo/${m}.mjs`);
     const exportados = [];
-    src = src.replace(/^import\s*\{([^}]*)\}\s*from\s*"\.\/(\w+)\.mjs";?[ \t]*$/gm, (_, nombres, mod) => `const {${nombres}} = M_${mod};`);
+    src = src.replace(/^import\s*\{([^}]*)\}\s*from\s*"\.\/(\w+)\.mjs";?[ \t]*$/gm, (_, nombres, mod) => `const {${nombres.replace(/(\w+)\s+as\s+(\w+)/g, "$1: $2")}} = M_${mod};`);
     src = src.replace(/^export\s+((?:async\s+)?(?:const|let|function\*?|class))\s+(\w+)/gm, (_, kw, nombre) => { exportados.push(nombre); return `${kw} ${nombre}`; });
     if (/^\s*(import|export)\b/m.test(src)) throw new Error(`nucleo/${m}.mjs usa una forma de import/export que el empaquetador no entiende`);
     partes.push(`const M_${m} = (() => {\n${src}\nreturn { ${exportados.join(", ")} };\n})();\n`);

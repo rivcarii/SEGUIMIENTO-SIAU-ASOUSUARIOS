@@ -33,6 +33,6 @@ export function crearFotosMemoria() {
     guardar(base64, tipo) { const id = `foto${String(++n).padStart(8, "0")}`; guardadas.set(id, { base64, tipo }); return id; },
     existe: (id) => guardadas.has(id),
     borrar: (id) => guardadas.delete(id),
-    datos: (id) => `data:image/jpeg;base64,${guardadas.get(id)?.base64 ?? ""}`,
+    datos: (id) => `data:${guardadas.get(id)?.tipo ?? "image/jpeg"};base64,${guardadas.get(id)?.base64 ?? ""}`,
   };
 }

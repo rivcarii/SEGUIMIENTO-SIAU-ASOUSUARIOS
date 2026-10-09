@@ -1,5 +1,6 @@
 import { abrirLibro } from "../shared/xlsx.js";
 import { prepararLibro, ETIQUETAS } from "../shared/preparar.js";
+import { formEvidencia } from "../shared/formevidencia.js";
 import { api, h, fechaHoy, fmtFecha, mesActual, opciones, pintarMarca, mascota, tituloGrande } from "../shared/comun.js";
 
 const app = document.getElementById("app");
@@ -21,79 +22,11 @@ const SECCIONES = [["nueva", "Nueva evidencia"], ["lista", "Evidencias"], ["impo
 function render() {
   const cont = h("div");
   app.replaceChildren(titulo.el, h("nav", { class: "tabs glass" }, SECCIONES.map(([k, n]) => h("button", { "aria-pressed": k === seccion, onclick: () => { seccion = k; render(); } }, n))), cont);
-  ({ nueva: formEvidencia, lista: listaEvidencias, importar, personal, catalogos, metas, marca })[seccion](cont);
+  ({ nueva: nuevaEvidencia, lista: listaEvidencias, importar, personal, catalogos, metas, marca })[seccion](cont);
 }
 
-// ---- reducción de imagen en el navegador (fotos de celular pesan 5-10 MB)
-async function reducir(file, max = 1600) {
-  if (!/^image\/(jpeg|png|webp)$/.test(file.type)) throw new Error(`"${file.name}": formato no soportado (usa JPG, PNG o WebP)`);
-  const bmp = await createImageBitmap(file).catch(() => null);
-  if (!bmp) return file;
-  const k = Math.min(1, max / Math.max(bmp.width, bmp.height));
-  const c = document.createElement("canvas");
-  c.width = Math.round(bmp.width * k); c.height = Math.round(bmp.height * k);
-  c.getContext("2d").drawImage(bmp, 0, 0, c.width, c.height);
-  return new Promise((ok) => c.toBlob((b) => ok(b ?? file), "image/jpeg", 0.85));
-}
-const aBase64 = (blob) => new Promise((ok, no) => { const r = new FileReader(); r.onload = () => ok(String(r.result).split(",")[1]); r.onerror = () => no(new Error("No se pudo leer la imagen")); r.readAsDataURL(blob); });
-async function subir(blob) { return (await api("/api/admin/foto", { json: { base64: await aBase64(blob), tipo: blob.type } })).archivo; }
-/** Miniatura JPEG diminuta (≤ 40 000 caracteres) que viaja dentro del propio registro para que el visor la muestre al instante. */
-async function miniatura(blob) {
-  const bmp = await createImageBitmap(blob), k = Math.min(1, 280 / Math.max(bmp.width, bmp.height));
-  const c = document.createElement("canvas"); c.width = Math.max(1, Math.round(bmp.width * k)); c.height = Math.max(1, Math.round(bmp.height * k));
-  c.getContext("2d").drawImage(bmp, 0, 0, c.width, c.height);
-  for (const q of [0.7, 0.55, 0.4, 0.25]) { const u = c.toDataURL("image/jpeg", q); if (u.length <= 40000) return u; }
-  return null;
-}
-
-// ---- Nueva / editar evidencia
-function formEvidencia(cont, ev = null, alGuardar = null) {
-  const f = { tipo: h("select", { required: true }), fecha: h("input", { type: "date", required: true, value: ev?.fecha ?? fechaHoy() }),
-    sede: h("select"), tecnico: h("select"), titulo: h("input", { type: "text", required: true, maxLength: 200, value: ev?.titulo ?? "" }),
-    desc: h("textarea", { maxLength: 5000 }, ev?.descripcion ?? ""), cant: h("input", { type: "number", min: 1, value: ev?.cantidad ?? 1 }),
-    asist: h("input", { type: "number", min: 0, value: ev?.asistentes ?? "" }), fotos: h("input", { type: "file", multiple: true, accept: "image/jpeg,image/png,image/webp" }) };
-  f.tipo.replaceChildren(...["siau", "asociacion"].map((a) => h("optgroup", { label: a === "siau" ? cfg.marca.nombre_siau : cfg.marca.nombre_asociacion }, cfg.tipos.filter((t) => t.area === a).map((t) => h("option", { value: t.clave }, t.nombre)))));
-  opciones(f.sede, cfg.sedes.filter((s) => s.activa), "id", "nombre", "— sin sede —");
-  opciones(f.tecnico, cfg.tecnicos.filter((t) => t.activo), "id", "nombre", "— sin técnico —");
-  if (ev) { f.tipo.value = ev.tipo; f.sede.value = ev.sede_id ?? ""; f.tecnico.value = ev.tecnico_id ?? ""; }
-  let fotosActuales = [...(ev?.fotos_ids ?? [])];
-  const prev = h("div", { class: "thumbs" }), msg = h("div"), btn = h("button", { class: "btn" }, ev ? "Guardar cambios" : "Guardar evidencia");
-  const quitar = (i) => () => { fotosActuales.splice(i, 1); pintarPrev(); };
-  const pintarPrev = () => prev.replaceChildren(...fotosActuales.map((a, i) => h("span", {}, i === 0 && ev?.portada && a === ev.fotos_ids[0] ? h("img", { src: ev.portada, alt: "" }) : h("span", { class: "mut" }, "Foto " + (i + 1)),
-    h("button", { type: "button", class: "btn sec", title: "Quitar", "aria-label": "Quitar foto " + (i + 1), onclick: quitar(i) }, "×"))));
-  pintarPrev();
-
-  const form = h("form", { class: "card", onsubmit: async (e) => {
-    e.preventDefault(); btn.disabled = true; msg.replaceChildren(h("div", { class: "msg" }, "Subiendo…"));
-    try {
-      const nuevas = [];
-      let portadaNueva = null;
-      for (const file of f.fotos.files) {
-        const blob = await reducir(file);
-        if (!nuevas.length) portadaNueva = await miniatura(blob).catch(() => null);
-        nuevas.push(await subir(blob));
-      }
-      const ids = [...fotosActuales, ...nuevas];
-      let portada = null;
-      if (ids.length) {
-        if (ev?.portada && ids[0] === ev.fotos_ids[0]) portada = ev.portada;
-        else if (ids[0] === nuevas[0]) portada = portadaNueva;
-        else { const d = await api("/api/foto?id=" + encodeURIComponent(ids[0])); portada = await miniatura(await (await fetch(d.data)).blob()).catch(() => null); }
-      }
-      const body = { tipo: f.tipo.value, fecha: f.fecha.value, sede_id: f.sede.value, tecnico_id: f.tecnico.value, titulo: f.titulo.value, descripcion: f.desc.value, cantidad: f.cant.value, asistentes: f.asist.value, fotos: ids, portada };
-      if (ev) await api("/api/admin/evidencias/" + ev.id, { method: "PUT", json: body }); else await api("/api/admin/evidencias", { json: body });
-      if (alGuardar) return alGuardar();
-      form.reset(); fotosActuales = []; pintarPrev(); f.fecha.value = fechaHoy(); aviso(msg, true, "Evidencia guardada.");
-    } catch (er) { aviso(msg, false, er.message); }
-    btn.disabled = false;
-  } },
-    h("div", { class: "row" }, h("div", {}, h("label", {}, "Tipo de evidencia"), f.tipo), h("div", {}, h("label", {}, "Fecha"), f.fecha), h("div", {}, h("label", {}, "Sede"), f.sede), h("div", {}, h("label", {}, "Técnico (SIAU)"), f.tecnico)),
-    h("label", {}, "Título"), f.titulo, h("label", {}, "Descripción (tema de la charla, actividad del subcronograma, etc.)"), f.desc,
-    h("div", { class: "row" }, h("div", {}, h("label", {}, "Cantidad (cuenta para la meta)"), f.cant), h("div", {}, h("label", {}, "Asistentes (opcional)"), f.asist)),
-    h("label", {}, "Fotos (se reducen automáticamente)"), f.fotos, prev, msg, h("p", {}, btn),
-    h("p", { class: "mut" }, "Evite fotografiar rostros de pacientes o documentos con datos personales sin autorización."));
-  cont.replaceChildren(form);
-}
+// ---- Nueva / editar evidencia (el formulario es el mismo de la Fototeca del visor)
+function nuevaEvidencia(cont, ev = null, alGuardar = null) { cont.replaceChildren(formEvidencia({ cfg, ev, alGuardar, alCancelar: ev ? alGuardar : null })); }
 
 // ---- Lista / edición
 async function listaEvidencias(cont) {
@@ -104,9 +37,9 @@ async function listaEvidencias(cont) {
     const q = new URLSearchParams({ limit: 100 });
     if (tipo.value) q.set("tipo", tipo.value); if (sede.value) q.set("sede", sede.value);
     const r = await api("/api/evidencias?" + q);
-    tabla.replaceChildren(h("div", { class: "card scroll" }, h("table", {}, h("thead", {}, h("tr", {}, ["Fecha", "Tipo", "Título", "Sede", "Fotos", ""].map((t) => h("th", {}, t)))),
-      h("tbody", {}, r.items.map((e) => h("tr", {}, h("td", {}, fmtFecha(e.fecha)), h("td", {}, e.tipo_nombre), h("td", {}, e.titulo), h("td", {}, e.sede ?? ""), h("td", {}, String(e.fotos_ids.length)),
-        h("td", {}, h("button", { class: "btn sec", onclick: () => formEvidencia(cont, e, () => { listaEvidencias(cont); }) }, "Editar"), " ",
+    tabla.replaceChildren(h("div", { class: "card scroll" }, h("table", {}, h("thead", {}, h("tr", {}, ["Fecha", "Tipo", "Título", "Sede", "Archivos", ""].map((t) => h("th", {}, t)))),
+      h("tbody", {}, r.items.map((e) => h("tr", {}, h("td", {}, fmtFecha(e.fecha)), h("td", {}, e.tipo_nombre), h("td", {}, e.titulo), h("td", {}, e.sede ?? ""), h("td", {}, `${e.fotos_ids.length} foto(s) · ${e.documentos.length} PDF`),
+        h("td", {}, h("button", { class: "btn sec", onclick: () => nuevaEvidencia(cont, e, () => { listaEvidencias(cont); }) }, "Editar"), " ",
           h("button", { class: "btn del", onclick: async () => { if (confirm(`¿Eliminar "${e.titulo}" y sus fotos?`)) { await api("/api/admin/evidencias/" + e.id, { method: "DELETE" }); recargar(); } } }, "Eliminar"))))))));
   }
   tipo.onchange = sede.onchange = cargar;

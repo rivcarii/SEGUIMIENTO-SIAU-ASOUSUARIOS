@@ -117,7 +117,7 @@ function crearFotosDrive(carpetaId) {
   function archivo_(id) { try { return DriveApp.getFileById(id); } catch (e) { return null; } }
   return {
     guardar: function (base64, tipo) {
-      var ext = tipo === 'image/png' ? 'png' : tipo === 'image/webp' ? 'webp' : 'jpg';
+      var ext = tipo === 'image/png' ? 'png' : tipo === 'image/webp' ? 'webp' : tipo === 'application/pdf' ? 'pdf' : 'jpg';
       var blob = Utilities.newBlob(Utilities.base64Decode(base64), tipo, 'evidencia-' + Date.now() + '.' + ext);
       return DriveApp.getFolderById(carpetaId).createFile(blob).getId();
     },

@@ -5,6 +5,7 @@ import { parsearBuzon, parsearCharlasMatriz, parsearEncuestas, parsearHorario, p
 import { calcularCumplimiento, calcularPorTecnico, fechaValida, mesValido } from "./lib.mjs";
 import { analizar } from "./analisis.mjs";
 import { mismaPersona, sedesPorPersona } from "./rotacion.mjs";
+import { consultar, panel as armarPanel, MEDIDAS, DIMENSIONES } from "./analitica.mjs";
 
 export const VERSION_DATOS = 3;
 export class ErrorHttp extends Error { constructor(estado, mensaje) { super(mensaje); this.estado = estado; } }
@@ -42,6 +43,7 @@ const enteroEn = (v, min, max, def) => {
 const ultimoDiaMes = (mes) => new Date(Number(mes.slice(0, 4)), Number(mes.slice(5)), 0).getDate();
 const enOrden = (a, b) => String(a).localeCompare(String(b), "es");
 const lista = (v) => { try { return v ? JSON.parse(v) : []; } catch { return []; } };
+const idsDe = (e) => [...lista(e.fotos), ...lista(e.documentos).map((d) => d.id)];
 const porId = (filas) => new Map(filas.map((f) => [f.id, f]));
 
 /** Crea las tablas base (40 sedes con alias, tipos de evidencia). Idempotente; fusiona alias agregados a mano. */
@@ -97,14 +99,16 @@ export function crearNucleo({ almacen, fotos, hoy = () => new Date().toLocaleDat
     const limit = enteroEn(q.limit, 1, 100, 24), offset = enteroEn(q.offset, 0, 1e6, 0);
     const sedes = porId(T("sedes").todos()), tecnicos = porId(T("tecnicos").todos()), tipos = porId(T("tipos").todos());
     const filas = T("evidencias").todos().filter((e) => (!q.area || e.area === q.area) && (!q.tipo || e.tipo === q.tipo) && (!q.sede || String(e.sede_id) === String(q.sede))
-      && (!q.tecnico || String(e.tecnico_id) === String(q.tecnico)) && (!q.mes || e.fecha.startsWith(q.mes)))
+      && (!q.tecnico || String(e.tecnico_id) === String(q.tecnico)) && (!q.mes || e.fecha.startsWith(q.mes))
+      && (!q.buscar || `${e.titulo} ${e.descripcion ?? ""} ${lista(e.documentos).map((d) => d.nombre).join(" ")}`.toLowerCase().includes(String(q.buscar).toLowerCase()))
+      && (q.album !== "fotos" || lista(e.fotos).length > 0) && (q.album !== "documentos" || lista(e.documentos).length > 0))
       .sort((a, b) => (a.fecha < b.fecha ? 1 : a.fecha > b.fecha ? -1 : b.id - a.id));
     return {
       total: filas.length,
       items: filas.slice(offset, offset + limit).map((e) => {
         const ids = lista(e.fotos);
         return { ...e, descripcion: e.descripcion ?? "", sede: sedes.get(e.sede_id)?.nombre ?? null, tecnico: tecnicos.get(e.tecnico_id)?.nombre ?? null,
-          tipo_nombre: tipos.get(e.tipo)?.nombre ?? e.tipo, fotos: undefined, fotos_ids: ids, portada: e.portada ?? null };
+          tipo_nombre: tipos.get(e.tipo)?.nombre ?? e.tipo, fotos: undefined, fotos_ids: ids, documentos: lista(e.documentos), portada: e.portada ?? null };
       }),
     };
   }
@@ -176,6 +180,19 @@ export function crearNucleo({ almacen, fotos, hoy = () => new Date().toLocaleDat
     return { ...e, hallazgos: analizar(e, Date.parse(ahora().replace(" ", "T") + "Z")) };
   }
 
+  function panelDe(mes) {
+    if (!mesValido(mes)) throw bad("Mes inválido");
+    return armarPanel(mes, cumplimiento(mes), { mensual: T("mensual").todos(), evidencias: T("evidencias").todos(), sedes: T("sedes").todos().filter((s) => Number(s.activa)), tipos: T("tipos").todos() });
+  }
+
+  /** Motor de consulta: una medida, agrupada por mes, sede, SIAU o tipo, con filtros de periodo, sede y SIAU. */
+  function consulta(q) {
+    try {
+      return { ...consultar(q, { mensual: T("mensual").todos(), actas: T("actas").todos(), evidencias: T("evidencias").todos(), sedes: T("sedes").todos(), tipos: T("tipos").todos() }, (mes) => cumplimiento(mes).siau.tecnicos, hoy()),
+        medidas: Object.entries(MEDIDAS).map(([clave, m]) => ({ clave, etiqueta: m.etq, por_siau: Boolean(m.tec) })), dimensiones: DIMENSIONES };
+    } catch (e) { if (e.estado === 400 && !(e instanceof ErrorHttp)) throw bad(e.message); throw e; }
+  }
+
   // ───────── Escritura
   function validarEvidencia(b) {
     const tipo = T("tipos").todos().find((t) => t.clave === b.tipo);
@@ -188,9 +205,12 @@ export function crearNucleo({ almacen, fotos, hoy = () => new Date().toLocaleDat
     if (ids.length > 30) throw bad("Máximo 30 fotos por evidencia");
     for (const f of ids) if (typeof f !== "string" || !fotos.existe(f)) throw bad("Foto no encontrada: súbela de nuevo");
     // La portada es una miniatura (JPEG diminuto) guardada en el propio registro: se ve al instante y no depende de que el navegador pueda abrir Drive.
+    const docs = Array.isArray(b.documentos) ? b.documentos : [];
+    if (docs.length > 20) throw bad("Máximo 20 documentos por evidencia");
+    const documentos = docs.map((d) => { if (!d || typeof d.id !== "string" || !fotos.existe(d.id)) throw bad("Documento no encontrado: súbelo de nuevo"); return { id: d.id, nombre: txt(d.nombre, 150) || "Documento.pdf" }; });
     const portada = ids.length && typeof b.portada === "string" && /^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/.test(b.portada) && b.portada.length <= 40000 ? b.portada : null;
     return { area: tipo.area, tipo: tipo.clave, titulo: txt(b.titulo, 200, true), descripcion: txt(b.descripcion, 5000), fecha: b.fecha, sede_id: sede, tecnico_id: tec,
-      cantidad: enteroEn(b.cantidad, 1, 100000, 1), asistentes: enteroEn(b.asistentes, 0, 100000, null), fotos: JSON.stringify(ids), portada };
+      cantidad: enteroEn(b.cantidad, 1, 100000, 1), asistentes: enteroEn(b.asistentes, 0, 100000, null), fotos: JSON.stringify(ids), documentos: JSON.stringify(documentos), portada };
   }
 
   /** Reemplaza lo que ya se había leído de ese consolidado (correcciones y filas borradas se reflejan; nada se duplica). */
@@ -280,12 +300,14 @@ export function crearNucleo({ almacen, fotos, hoy = () => new Date().toLocaleDat
     if (m === "GET" && p === "/api/config") { exigir(usuario, "visor"); return config(); }
     if (m === "GET" && p === "/api/evidencias") { exigir(usuario, "visor"); return listarEvidencias(q); }
     if (m === "GET" && p === "/api/cumplimiento") { exigir(usuario, "visor"); return cumplimiento(q.mes ?? hoy().slice(0, 7), q.hoy || undefined); }
+    if (m === "GET" && p === "/api/panel") { exigir(usuario, "visor"); return panelDe(q.mes ?? hoy().slice(0, 7)); }
+    if (m === "GET" && p === "/api/consulta") { exigir(usuario, "visor"); return consulta(q); }
     if (m === "GET" && p === "/api/estado") { exigir(usuario, "visor"); const { hallazgos, fuentes } = estado(q.hoy || undefined); return { hallazgos, fuentes: fuentes.map(({ tipo, creado }) => ({ tipo, creado })) }; }
 
     if (m === "GET" && p === "/api/foto") {
       exigir(usuario, "visor");
       const id = String(q.id ?? "");
-      if (!T("evidencias").todos().some((e) => lista(e.fotos).includes(id))) throw new ErrorHttp(404, "Foto no encontrada");
+      if (!T("evidencias").todos().some((e) => idsDe(e).includes(id))) throw new ErrorHttp(404, "Foto no encontrada");
       return { data: fotos.datos(id) };
     }
 
@@ -297,7 +319,8 @@ export function crearNucleo({ almacen, fotos, hoy = () => new Date().toLocaleDat
     if (m === "GET" && p === "/api/admin/estado") return estado(q.hoy || undefined);
 
     if (m === "POST" && p === "/api/admin/foto") {
-      if (!/^image\/(jpeg|png|webp)$/.test(b.tipo ?? "")) throw bad("Solo se aceptan imágenes JPG, PNG o WebP");
+      if (!/^(image\/(jpeg|png|webp)|application\/pdf)$/.test(b.tipo ?? "")) throw bad("Solo se aceptan imágenes JPG, PNG o WebP y documentos PDF");
+      if (b.tipo === "application/pdf" && !String(b.base64).startsWith("JVBER")) throw bad("El archivo no es un PDF válido");
       if (typeof b.base64 !== "string" || b.base64.length < 100 || b.base64.length > 16e6) throw bad("Imagen vacía o demasiado grande");
       return { archivo: fotos.guardar(b.base64, b.tipo) };
     }
@@ -305,8 +328,8 @@ export function crearNucleo({ almacen, fotos, hoy = () => new Date().toLocaleDat
     if ((r = /^\/api\/admin\/evidencias\/(\d+)$/.exec(p))) {
       const id = Number(r[1]), actual = T("evidencias").todos().find((e) => e.id === id);
       if (!actual) throw new ErrorHttp(404, "No existe");
-      if (m === "PUT") return escribir(() => { const v = validarEvidencia(b), nuevas = lista(v.fotos); for (const f of lista(actual.fotos)) if (!nuevas.includes(f)) fotos.borrar(f); T("evidencias").actualizar(id, v); return { ok: true }; });
-      if (m === "DELETE") return escribir(() => { for (const f of lista(actual.fotos)) fotos.borrar(f); T("evidencias").borrar(id); return { ok: true }; });
+      if (m === "PUT") return escribir(() => { const v = validarEvidencia(b), nuevas = idsDe(v); for (const f of idsDe(actual)) if (!nuevas.includes(f)) fotos.borrar(f); T("evidencias").actualizar(id, v); return { ok: true }; });
+      if (m === "DELETE") return escribir(() => { for (const f of idsDe(actual)) fotos.borrar(f); T("evidencias").borrar(id); return { ok: true }; });
     }
     if (m === "POST" && p === "/api/admin/sedes") return escribir(() => {
       const nombres = (Array.isArray(b.nombres) ? b.nombres : []).map((n) => txt(n, 120)).filter(Boolean).slice(0, 200), t = T("sedes"), ya = new Set(t.todos().map((s) => s.nombre));

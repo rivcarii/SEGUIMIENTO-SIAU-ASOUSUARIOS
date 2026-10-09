@@ -1,17 +1,21 @@
 import { api, h, mesActual, fmtFecha, opciones, pintarMarca, mascota, tituloGrande, mesLegible, recurso } from "../shared/comun.js";
+import { vistaPanel } from "./panel.js";
+import { vistaConsultas } from "./consultas.js";
+import { vistaFototeca } from "./fototeca.js";
+import { construirReporte, descargarReporte } from "../shared/reporte.js";
 
 const app = document.getElementById("app"), dlg = document.getElementById("dlg"), dlgc = document.getElementById("dlgc"), tabbar = document.getElementById("tabbar");
-const S = { cfg: null, area: "siau", vista: "cumplimiento", mes: mesActual(), filtros: {}, siau: "" };
-const PAGINA = 24;
+const S = { cfg: null, area: "siau", vista: "panel", mes: mesActual(), filtros: {}, siau: "", rol: null, album: "fotos" };
 const AREAS = ["siau", "asociacion"];
-const delay = (i) => `--d:${Math.min(i, 8) * 40}ms`;
 let tg, seg, segThumb, cont, tabThumb;
 
 async function iniciar() {
   try { S.cfg = await api("/api/config"); }
   catch (e) { return app.replaceChildren(h("div", { class: "login" }, mascota("atento", 170), h("div", { class: "card" }, h("h2", {}, "No se pudo abrir"), h("p", {}, e.message)))); }
   pintarMarca(S.cfg.marca);
-  api("/api/sesion").then((u) => { if (u.rol === "admin") document.getElementById("irAdmin").hidden = false; }).catch(() => {});
+  try { S.rol = (await api("/api/sesion")).rol; } catch { S.rol = null; }
+  if (S.rol === "admin") document.getElementById("irAdmin").hidden = false;
+  S.rerender = render;
   montar();
   render();
 }
@@ -26,7 +30,7 @@ function montar() {
 
   tabThumb = h("i", { class: "thumb" });
   tabbar.style.setProperty("--n", AREAS.length);
-  tabbar.replaceChildren(tabThumb, ...AREAS.map((a) => h("button", { role: "tab", "data-area": a, onclick: () => { if (S.area !== a) { S.area = a; S.filtros = {}; S.vista = a === "siau" ? "cumplimiento" : "evidencias"; render(); } } },
+  tabbar.replaceChildren(tabThumb, ...AREAS.map((a) => h("button", { role: "tab", "data-area": a, onclick: () => { if (S.area !== a) { S.area = a; S.filtros = {}; S.vista = a === "siau" ? "panel" : "fototeca"; render(); } } },
     h("img", { src: recurso(a === "siau" ? "/shared/marca/medalla.png" : "/shared/marca/asociacion-icono.png"), alt: "" }), S.cfg.marca[a === "siau" ? "nombre_siau" : "nombre_asociacion"])));
   tabbar.hidden = false;
 }
@@ -39,14 +43,15 @@ function render() {
   tg.titulo.textContent = "Evidencias " + (S.area === "siau" ? S.cfg.marca.nombre_siau : S.cfg.marca.nombre_asociacion);
   document.querySelector(".nav-titulo").textContent = tg.titulo.textContent;
 
-  const vistas = S.area === "siau" ? [["cumplimiento", "Cumplimiento"], ["evidencias", "Muestras"], ["ludoteca", "Ludoteca"]] : [["evidencias", "Muestras"]];
+  const vistas = S.area === "siau" ? [["panel", "Panel"], ["cumplimiento", "Cumplimiento"], ["consultas", "Consultas"], ["fototeca", "Fototeca"], ["ludoteca", "Ludoteca"]] : [["fototeca", "Fototeca"]];
   seg.hidden = vistas.length < 2;
   seg.style.setProperty("--n", vistas.length);
   seg.style.setProperty("--i", Math.max(0, vistas.findIndex(([v]) => v === S.vista)));
   seg.replaceChildren(segThumb, ...vistas.map(([v, n]) => h("button", { role: "tab", "aria-selected": v === S.vista, onclick: () => { if (S.vista !== v) { S.vista = v; render(); } } }, n)));
   cont.className = "entra";
   cont.replaceChildren();
-  ({ cumplimiento: vistaCumplimiento, evidencias: vistaEvidencias, ludoteca: vistaLudoteca }[S.vista])(cont);
+  const ir = (vista, extra = {}) => { S.vista = vista; if ("siau" in extra) S.siau = extra.siau; render(); window.scrollTo({ top: 0 }); };
+  ({ panel: () => vistaPanel(cont, S, ir, render), cumplimiento: () => vistaCumplimiento(cont), consultas: () => vistaConsultas(cont, S), fototeca: () => vistaFototeca(cont, S, { dlg, dlgc }), ludoteca: () => vistaLudoteca(cont) }[S.vista])();
 }
 
 const sec = (n, titulo, ...extra) => h("div", { class: "encab" }, h("span", { class: "n" }, "§" + n), h("h2", {}, titulo), ...extra);
@@ -104,8 +109,8 @@ async function vistaCumplimiento(c) {
       hay ? h("span", { class: "barra", role: "img", "aria-label": `${nTot ? Math.round((100 * n) / nTot) : 0}% del total` }, h("i", { style: `transform:scaleX(${nTot ? n / nTot : 0})` })) : ""))) : "";
 
   // Una tarjeta por SIAU: lo más atrasado primero; quien está ausente al final
-  const avance = (t) => Math.min(pctDe(t.encuestas.valor, t.encuestas.meta), pctDe(t.charlas.valor, t.charlas.meta));
-  const estadoDe = (t) => t.ausente ? ["ausente", t.ausencias[0]?.tipo ?? "Ausente"] : t.encuestas.cumple !== false && t.charlas.cumple !== false ? ["cumple", "Cumple"] : avance(t) >= 60 ? ["camino", "En camino"] : ["atencion", "Atención"];
+  const avance = (t) => t.avance;
+  const estadoDe = (t) => [t.estado, t.estado === "ausente" ? (t.ausencias[0]?.tipo ?? "Ausente") : { cumple: "Cumple", camino: "En camino", atencion: "Atención" }[t.estado]];
   const barra = (etq, m, detalle) => { const p = pctDe(m.valor, m.meta); return h("div", { class: "fila-meta" },
     h("div", { class: "et" }, h("span", {}, etq), h("b", { class: "num" }, m.meta == null ? String(m.valor) : `${m.valor} / ${m.meta}`)),
     m.meta ? h("div", { class: "barra " + clase(p), role: "img", "aria-label": `${etq}: ${p}% de la meta` }, h("i", { style: `transform:scaleX(${p / 100})` })) : "",
@@ -148,7 +153,9 @@ async function vistaCumplimiento(c) {
   const hall = (est?.hallazgos ?? []).filter((x) => x.nivel !== "info");
   const bot = hall.length ? h("div", { class: "msg err" }, h("b", {}, "Atención con los datos: "), hall.slice(0, 4).map((x) => h("div", {}, "• " + x.texto))) : "";
 
-  c.replaceChildren(hero, h("div", { class: "filters" }, h("label", { style: "margin:0" }, "Periodo de observación"), mes, filtroSiau), ...avisos,
+  c.replaceChildren(hero, h("div", { class: "filters" }, h("label", { style: "margin:0" }, "Periodo de observación"), mes, filtroSiau,
+      h("button", { class: "btn", onclick: () => descargarReporte(construirReporte(d, S.siau)) }, S.siau ? "Reporte de esta persona" : "Descargar reporte"),
+      h("button", { class: "btn sec", onclick: async (ev) => { try { await navigator.clipboard.writeText(construirReporte(d, S.siau).texto); ev.target.textContent = "¡Copiado!"; } catch { ev.target.textContent = "No se pudo copiar"; } setTimeout(() => { ev.target.textContent = "Copiar resumen"; }, 2000); } }, "Copiar resumen")), ...avisos,
     sec(1, S.siau ? "Cumplimiento de " + quien : "Cumplimiento global"), resumen, ...(S.siau ? [] : [h("div", { style: "height:14px" }), porTipo]), detalleSiau,
     h("div", { style: "height:14px" }), sec(2, S.siau ? "Detalle" : "Cumplimiento por SIAU"), tabla, h("p", { class: "leyenda" }, h("b", {}, "Fig. 1."), " Metas mínimas por SIAU. Lo registrado en cada sede se reparte entre quienes la atienden; la meta baja en proporción a los días de vacaciones o licencia."),
     ...(sinCob && !S.siau ? [sec(3, "Sedes sin cobertura"), sinCob] : []),
@@ -164,55 +171,6 @@ function vistaLudoteca(c) {
     h("img", { src: recurso("/shared/marca/ludoteca.png"), alt: "Proyecto Ludoteca", style: "max-height:90px;max-width:80%" })));
 }
 
-// ---------- Muestras (galería)
-function vistaEvidencias(c) {
-  const tipos = S.cfg.tipos.filter((t) => t.area === S.area);
-  const f = S.filtros;
-  const sel = (k, lista, etiqueta, valor, texto) => { const s = h("select", { "aria-label": etiqueta, onchange: () => { f[k] = s.value; cargar(true); } }); opciones(s, lista, valor, texto, etiqueta); s.value = f[k] ?? ""; return s; };
-  const mes = h("input", { type: "month", value: f.mes ?? "", "aria-label": "Mes", onchange: () => { f.mes = mes.value; cargar(true); } });
-  const lista = h("div", { class: "grid" }), pie = h("div", { style: "text-align:center;margin:18px" });
-  c.append(sec(1, "Muestras registradas"),
-    h("div", { class: "filters" }, sel("tipo", tipos, "Todos los tipos", "clave", "nombre"), sel("sede", S.cfg.sedes, "Todas las sedes", "id", "nombre"),
-      S.area === "siau" ? sel("tecnico", S.cfg.tecnicos, "Todos los técnicos", "id", "nombre") : "", mes), lista, pie);
-
-  let offset = 0;
-  async function cargar(reset) {
-    if (reset) { offset = 0; lista.replaceChildren(); }
-    const q = new URLSearchParams({ area: S.area, limit: PAGINA, offset });
-    for (const [k, v] of Object.entries(f)) if (v) q.set(k, v);
-    let r;
-    try { r = await api("/api/evidencias?" + q); } catch (e) { return pie.replaceChildren(h("div", { class: "msg err" }, e.message)); }
-    const base = offset;
-    lista.append(...r.items.map((e, i) => tarjeta(e, base === 0 ? i : 0)));
-    offset += r.items.length;
-    pie.replaceChildren(offset < r.total ? h("button", { class: "btn sec", onclick: () => cargar(false) }, `Ver más (${r.total - offset})`)
-      : r.total ? h("span", { class: "leyenda" }, `${r.total} muestra(s)`) : h("div", { class: "vacio" }, mascota("manos", 130), "No hay muestras con estos filtros."));
-  }
-  cargar(true);
-}
-
-function tarjeta(e, i) {
-  return h("button", { class: "card ev", style: delay(i), onclick: () => detalle(e) },
-    h("div", { class: "ph" }, e.portada ? h("img", { src: e.portada, alt: "", loading: "lazy" }) : e.fotos_ids.length ? "foto en Drive" : "sin imagen"),
-    h("div", { class: "cu" }, h("div", { class: "id" }, "Muestra N.º " + String(e.id).padStart(4, "0")), h("span", { class: "badge" }, e.tipo_nombre), h("h3", {}, e.titulo), h("div", { class: "mut" }, [fmtFecha(e.fecha), e.sede].filter(Boolean).join(" · "))));
-}
-
-/** La foto completa se pide al abrir la muestra (viene de Drive por el servidor, no por un enlace público). */
-function foto(id, alt) {
-  const ph = h("div", { class: "mut", style: "padding:24px;text-align:center" }, "Cargando imagen…"), caja = h("div", {}, ph);
-  api("/api/foto?id=" + encodeURIComponent(id)).then((r) => caja.replaceChildren(h("a", { href: r.data, target: "_blank", rel: "noopener" }, h("img", { src: r.data, alt })))).catch((e) => ph.replaceChildren("No se pudo cargar: " + e.message));
-  return caja;
-}
-
-function detalle(e) {
-  dlgc.replaceChildren(
-    h("div", { style: "display:flex;justify-content:space-between;gap:12px;align-items:flex-start" }, h("div", {}, h("div", { class: "kicker" }, "Muestra N.º " + String(e.id).padStart(4, "0")), h("span", { class: "badge" }, e.tipo_nombre), h("h2", { style: "margin:8px 0" }, e.titulo)), h("button", { class: "btn sec", onclick: () => dlg.close() }, "Cerrar")),
-    h("p", { class: "mut num" }, [fmtFecha(e.fecha), e.sede, e.tecnico && "Técnico: " + e.tecnico, e.cantidad > 1 && `Cantidad: ${e.cantidad}`, e.asistentes != null && `Asistentes: ${e.asistentes}`].filter(Boolean).join(" · ")),
-    e.descripcion ? h("p", { style: "white-space:pre-wrap" }, e.descripcion) : "",
-    h("div", { class: "fotos" }, e.fotos_ids.map((id, i) => foto(id, `${e.titulo} · imagen ${i + 1}`))),
-    e.fotos_ids.length ? h("p", { class: "leyenda" }, h("b", {}, "Fig."), " Imágenes de respaldo de la actividad.") : "");
-  dlg.showModal();
-}
 dlg.addEventListener("click", (ev) => { if (ev.target === dlg) dlg.close(); });
 
 iniciar();
