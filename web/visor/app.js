@@ -88,20 +88,20 @@ async function vistaCumplimiento(c) {
   const filtroSiau = h("select", { "aria-label": "SIAU", onchange: () => { S.siau = filtroSiau.value; render(); } }, h("option", { value: "" }, `Todos los SIAU (${todas.length})`),
     ...todas.map((t) => h("option", { value: String(t.tecnico_id) }, nombreCorto(t.nombre))));
   filtroSiau.value = S.siau;
-  // Resumen global (o de la persona elegida): suma lo logrado y las metas de quienes están activos
+  // Resumen global (o de la persona elegida): una franja de cifras con su barra de avance
   const sum = (k, c) => evaluados.reduce((t, x) => t + (x[k][c] ?? 0), 0);
-  const kpi = (etq, valor, meta, nota) => { const p = meta ? Math.min(100, Math.round((100 * valor) / meta)) : null; return h("div", { class: "card" }, h("div", { class: "mut" }, etq),
-    h("div", { class: "big", style: "margin-top:6px" }, String(valor), meta ? h("small", {}, ` / ${meta}`) : ""),
-    p == null ? "" : h("div", { class: "gauge " + clase(p), role: "img", "aria-label": `${p}% de la meta` }, h("i", { style: `transform:scaleX(${p / 100})` })), nota ? h("div", { class: "leyenda" }, nota) : ""); };
+  const cifra = (etq, valor, meta, nota) => { const p = meta ? Math.min(100, Math.round((100 * valor) / meta)) : null; return h("div", { class: "cifra " + (p == null ? "" : p >= 100 ? "ok" : p >= 60 ? "mid" : "low") },
+    h("span", { class: "k" }, etq), h("span", { class: "v" }, String(valor), meta ? h("small", {}, ` / ${meta}`) : ""),
+    p == null ? "" : h("span", { class: "barra " + clase(p), role: "img", "aria-label": `${p}% de la meta` }, h("i", { style: `transform:scaleX(${p / 100})` })), nota ? h("span", { class: "n" }, nota) : ""); };
   const actEsp = evaluados.reduce((t, x) => t + x.actas.esperadas, 0), actEnt = evaluados.reduce((t, x) => t + x.actas.entregadas, 0);
-  const resumen = evaluados.length ? h("div", { class: "grid" },
-    S.siau ? "" : kpi("SIAU que cumplen", cumplen, evaluados.length, `${filas.length - evaluados.length ? filas.length - evaluados.length + " ausente(s) sin evaluar" : "Todos activos"}`),
-    kpi("Encuestas", sum("encuestas", "valor"), sum("encuestas", "meta") || null, S.siau ? "" : "Suma de todos los SIAU activos"),
-    kpi("Charlas", sum("charlas", "valor"), sum("charlas", "meta") || null, S.siau ? "" : "Suma de todos los SIAU activos"),
-    kpi("Actas de buzón", actEnt, actEsp || null, "Entregadas hasta hoy")) : "";
-  const detalleSiau = S.siau && filas[0] ? h("div", { class: "card" }, h("div", { class: "mut" }, "Sedes que atiende este mes"),
-    h("div", { class: "chips", style: "margin-top:8px" }, filas[0].sedes.length ? filas[0].sedes.map((x) => h("span", { class: "chip-sede", style: "background:rgba(6,93,126,.12);color:var(--azul)" }, x)) : h("span", { class: "mut" }, "Sin sedes asignadas")),
-    filas[0].ausencias.length ? h("p", { class: "mut" }, "Ausencias: " + filas[0].ausencias.map((a) => `${a.tipo} (${fmtFecha(a.desde)} → ${fmtFecha(a.hasta)})`).join(" · ")) : "") : "";
+  const una = S.siau && filas[0] ? filas[0] : null;
+  const resumen = evaluados.length ? h("div", { class: "franja" },
+    una ? cifra("Días activos", una.dias_activos, una.dias_mes, una.ausencias.length ? "Hay ausencias este mes" : "Sin ausencias") : cifra("SIAU que cumplen", cumplen, evaluados.length, filas.length - evaluados.length ? `${filas.length - evaluados.length} ausente(s) sin evaluar` : "Todos activos"),
+    cifra("Encuestas", sum("encuestas", "valor"), sum("encuestas", "meta") || null, `NPS ${sum("encuestas", "nps")} · médica ${sum("encuestas", "medica")}`),
+    cifra("Charlas (asistentes)", sum("charlas", "valor"), sum("charlas", "meta") || null, una ? "" : "Suma de los SIAU activos"),
+    cifra("Actas de buzón", actEnt, actEsp || null, "Entregadas hasta hoy")) : "";
+  const detalleSiau = una ? h("p", { class: "menores" }, h("span", {}, "Sedes que atiende:"), ...(una.sedes.length ? una.sedes.map((x) => h("span", { class: "chip-sede suave" }, x)) : [h("b", {}, "ninguna asignada")]),
+    una.ausencias.length ? h("span", {}, "Ausencias: ", h("b", {}, una.ausencias.map((a) => `${a.tipo} (${fmtFecha(a.desde)} → ${fmtFecha(a.hasta)})`).join(" · "))) : "") : "";
   // Encuestas por tipo: cuánto aporta cada una al total que se compara con la meta
   const nNps = sum("encuestas", "nps"), nMed = sum("encuestas", "medica"), nTot = nNps + nMed;
   const TIPOS_ENC = [["Satisfacción de usuarios (NPS)", nNps, true], ["Evaluación médico asistencial", nMed, true], ["Encuesta IAMI", null, false], ["Control prenatal", null, false]];

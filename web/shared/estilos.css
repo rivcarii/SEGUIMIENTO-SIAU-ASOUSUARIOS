@@ -279,3 +279,5 @@ button.cifra{cursor:pointer;transition:background 160ms var(--ease-out)}@media(h
 @media(min-width:760px){.franja{grid-template-columns:repeat(4,minmax(0,1fr))}}
 @media(max-width:759px){.cifra:nth-child(n+3){border-top:1px solid rgba(6,93,126,.14)}.cifra:nth-child(odd)::before{display:none}}
 .menores{align-items:baseline}
+.cifra .barra{height:8px;margin:8px 0 2px}.menores .chip-sede.suave{font-size:12px}
+.menores{margin:12px 4px 4px}
