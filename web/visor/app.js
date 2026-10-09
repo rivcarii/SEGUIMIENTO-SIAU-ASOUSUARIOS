@@ -71,20 +71,23 @@ async function vistaCumplimiento(c) {
   const pctDe = (t, m) => Math.min(100, Math.round((t / m) * 100));
   const gauge = (t, m) => { const p = pctDe(t, m); return h("div", { class: "gauge " + clase(p), role: "img", "aria-label": `${p}% de la meta` }, h("i", { style: `transform:scaleX(${p / 100})` })); };
 
+  const oficial = (t) => d.consolidado?.[t.clave] ?? null;
+  const total = (t) => oficial(t) ?? t.total;
   const conMeta = d.tipos.filter((t) => t.meta);
-  const pcts = conMeta.map((t) => t.alcance === "tecnico" && t.porTecnico.length ? t.porTecnico.reduce((s, x) => s + pctDe(x.total, t.meta), 0) / t.porTecnico.length : pctDe(t.total, t.meta));
+  const pcts = conMeta.map((t) => t.alcance === "tecnico" && t.porTecnico.length ? t.porTecnico.reduce((s, x) => s + pctDe(x.total, t.meta), 0) / t.porTecnico.length : pctDe(total(t), t.meta));
   const prom = pcts.length ? Math.round(pcts.reduce((a, b) => a + b, 0) / pcts.length) : null;
   const alDia = d.actas.filter((a) => !a.faltantes.length).length;
   const titulo = prom == null ? "Aún no hay metas configuradas." : prom >= 100 ? "¡Metas del mes cumplidas!" : `Llevamos ${prom}% de las metas de ${mesLegible(d.mes)}.`;
-  const detalle = [...conMeta.map((t) => `${t.nombre.split(" ")[0]} ${t.total}/${t.meta}`), d.actas.length && `Actas al día ${alDia}/${d.actas.length} sedes`].filter(Boolean).join(" · ");
+  const detalle = [...conMeta.map((t) => `${t.nombre.split(" ")[0]} ${total(t)}/${t.meta}`), d.actas.length && `Actas al día ${alDia}/${d.actas.length} sedes`].filter(Boolean).join(" · ");
 
   const pose = prom == null ? "siau" : prom >= 100 ? "pulgar" : prom < 60 ? "dardo" : "siau";
   const hero = h("div", { class: "hero" }, mascota(pose), h("div", { class: "card glass globo" }, h("div", { class: "titulo" }, titulo), h("div", { class: "detalle" }, detalle)));
 
   const metas = h("div", { class: "grid" }, conMeta.map((t, i) => h("div", { class: "card", style: delay(i) },
     h("div", { class: "mut" }, t.nombre),
-    h("div", { class: "big", style: "margin-top:6px" }, String(t.total), " ", h("small", {}, `/ ${t.meta} ${t.alcance === "tecnico" ? "por técnico" : "al mes"}`)),
-    t.alcance === "global" ? [gauge(t.total, t.meta), h("div", { class: "pct" }, h("span", {}, "0"), h("span", {}, pctDe(t.total, t.meta) + "%"), h("span", {}, String(t.meta)))] : "")));
+    h("div", { class: "big", style: "margin-top:6px" }, String(total(t)), " ", h("small", {}, `/ ${t.meta} ${t.alcance === "tecnico" ? "por técnico" : "al mes"}`)),
+    t.alcance === "global" ? [gauge(total(t), t.meta), h("div", { class: "pct" }, h("span", {}, "0"), h("span", {}, pctDe(total(t), t.meta) + "%"), h("span", {}, String(t.meta)))] : "",
+    oficial(t) != null ? h("div", { class: "leyenda" }, "Fuente: consolidado oficial · con evidencia fotográfica: ", h("b", {}, String(t.total))) : "")));
 
   const tecnicos = d.tipos[0]?.porTecnico ?? [];
   const tabla = tecnicos.length ? h("div", { class: "card scroll" }, h("table", { class: "cient" },
@@ -104,7 +107,7 @@ async function vistaCumplimiento(c) {
 
   c.replaceChildren(hero,
     h("div", { class: "filters" }, h("label", { style: "margin:0" }, "Periodo de observación"), mes),
-    sec(1, "Metas del mes"), metas, h("p", { class: "leyenda" }, h("b", {}, "Fig. 1."), " Avance acumulado frente a la meta; las marcas del instrumento están cada 10 %."),
+    sec(1, "Metas del mes"), metas, h("p", { class: "leyenda" }, h("b", {}, "Fig. 1."), " Avance acumulado frente a la meta; las marcas del instrumento están cada 10 %.", d.sincronizado ? ` Consolidados sincronizados: ${d.sincronizado} UTC.` : ""),
     sec(2, "Avance por técnico"), tabla, h("p", { class: "leyenda" }, h("b", {}, "Tabla 1."), " Actividades registradas por técnico durante el periodo."),
     sec(3, "Actas de buzón"), actas, h("p", { class: "leyenda" }, h("b", {}, "Tabla 2."), " Sedes con actas pendientes (una por viernes)."), bot);
 }

@@ -1,6 +1,7 @@
 import { DatabaseSync } from "node:sqlite";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
+import { CATALOGO } from "./sedes.mjs";
 
 export const DATA_DIR = process.env.DATA_DIR ?? join(import.meta.dirname, "data");
 export const UPLOADS = join(DATA_DIR, "uploads");
@@ -21,8 +22,20 @@ CREATE TABLE IF NOT EXISTS evidencias(
 CREATE INDEX IF NOT EXISTS ev_fecha ON evidencias(fecha);
 CREATE TABLE IF NOT EXISTS fotos(id INTEGER PRIMARY KEY, evidencia_id INTEGER NOT NULL REFERENCES evidencias(id) ON DELETE CASCADE, archivo TEXT NOT NULL, orden INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS ajustes(clave TEXT PRIMARY KEY, valor TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS consolidado_charlas(id INTEGER PRIMARY KEY, fuente TEXT NOT NULL, fecha TEXT NOT NULL, sede_id INTEGER REFERENCES sedes(id), sede_texto TEXT NOT NULL, tema TEXT NOT NULL DEFAULT '', tipo TEXT NOT NULL DEFAULT '', asistentes INTEGER NOT NULL DEFAULT 0, responsable TEXT NOT NULL DEFAULT '');
+CREATE INDEX IF NOT EXISTS cc_fecha ON consolidado_charlas(fecha);
+CREATE TABLE IF NOT EXISTS consolidado_mensual(id INTEGER PRIMARY KEY, fuente TEXT NOT NULL, tecnico TEXT NOT NULL DEFAULT '', sede_id INTEGER REFERENCES sedes(id), sede_texto TEXT NOT NULL, periodo TEXT NOT NULL, indicador TEXT NOT NULL, valor INTEGER NOT NULL);
+CREATE INDEX IF NOT EXISTS cm_periodo ON consolidado_mensual(periodo, indicador);
+CREATE TABLE IF NOT EXISTS sincronizaciones(id INTEGER PRIMARY KEY, fuente TEXT NOT NULL, archivo TEXT NOT NULL DEFAULT '', creado TEXT NOT NULL DEFAULT (datetime('now')), resumen TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS verificaciones(id INTEGER PRIMARY KEY, periodo TEXT NOT NULL, creado TEXT NOT NULL DEFAULT (datetime('now')), resumen TEXT NOT NULL);
 `);
+
+// Sedes: columnas nuevas (bases creadas antes) y catálogo inicial de las 40 sedes.
+for (const col of ["codigo TEXT", "tipo TEXT", "alias TEXT"]) { try { db.exec(`ALTER TABLE sedes ADD COLUMN ${col}`); } catch { /* ya existe */ } }
+if (db.prepare("SELECT COUNT(*) n FROM sedes").get().n === 0) {
+  const ins = db.prepare("INSERT INTO sedes(nombre,codigo,tipo,alias) VALUES (?,?,?,?)");
+  for (const [nombre, tipo, codigo, largo] of CATALOGO) ins.run(nombre, codigo, tipo, largo ? JSON.stringify([largo]) : null);
+}
 
 // Tipos iniciales. Las metas se editan desde el administrador.
 const TIPOS = [

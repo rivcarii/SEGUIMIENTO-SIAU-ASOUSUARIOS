@@ -3,6 +3,8 @@ import { readFile, writeFile, unlink, stat } from "node:fs/promises";
 import { randomBytes } from "node:crypto";
 import { join, extname, normalize, sep } from "node:path";
 import { db, UPLOADS, ajuste, setAjuste } from "./db.mjs";
+import { crearResolver } from "./sedes.mjs";
+import { parsearRecoleccion, parsearSocializaciones } from "./consolidados.mjs";
 import { calcularCumplimiento, fechaValida, firmar, igualesSeguro, mesValido, tipoImagen, verificar } from "./lib.mjs";
 
 const PORT = Number(process.env.PORT ?? 3000);
@@ -27,7 +29,7 @@ async function leer(req, max) {
   for await (const c of req) { n += c.length; if (n > max) throw new HttpError(413, "Archivo demasiado grande"); chunks.push(c); }
   return Buffer.concat(chunks);
 }
-const leerJson = async (req) => { try { return JSON.parse((await leer(req, 1e6)).toString() || "{}"); } catch (e) { if (e instanceof HttpError) throw e; throw bad("JSON inválido"); } };
+const leerJson = async (req, max = 1e6) => { try { return JSON.parse((await leer(req, max)).toString() || "{}"); } catch (e) { if (e instanceof HttpError) throw e; throw bad("JSON inválido"); } };
 
 function sesion(req) {
   const m = /(?:^|; )sess=([^;]+)/.exec(req.headers.cookie ?? "");
@@ -123,6 +125,34 @@ async function subirImagen(req, max = 12e6) {
   return archivo;
 }
 
+/** Reemplaza lo que ya se había leído de ese archivo (así se reflejan correcciones y filas borradas). */
+function sincronizarConsolidado(b) {
+  const fuente = txt(b.archivo_id, 200, true), archivo = txt(b.archivo, 300);
+  const resolver = crearResolver(db.prepare("SELECT id,nombre,codigo,alias FROM sedes").all());
+  const noReconocidas = new Set(), resumen = { tipo: b.tipo, archivo };
+  const sedeId = (t, alt) => { const s = resolver(t) ?? (alt ? resolver(alt) : null); if (!s) noReconocidas.add(t || alt || "(vacía)"); return s?.id ?? null; };
+  db.exec("BEGIN");
+  try {
+    if (b.tipo === "socializaciones") {
+      const r = parsearSocializaciones(b.hojas?.["REGISTRO SOCIALIZACIONES"] ?? []);
+      db.prepare("DELETE FROM consolidado_charlas WHERE fuente=?").run(fuente);
+      const ins = db.prepare("INSERT INTO consolidado_charlas(fuente,fecha,sede_id,sede_texto,tema,tipo,asistentes,responsable) VALUES (?,?,?,?,?,?,?,?)");
+      for (const c of r.charlas) ins.run(fuente, c.fecha, sedeId(c.sede_texto, c.sede_alterna), c.sede_texto || c.sede_alterna, c.tema, c.tipo, c.asistentes, c.responsable);
+      Object.assign(resumen, { charlas: r.charlas.length, avisos: r.avisos });
+    } else if (b.tipo === "recoleccion") {
+      const r = parsearRecoleccion(b.hojas ?? {});
+      db.prepare("DELETE FROM consolidado_mensual WHERE fuente=?").run(fuente);
+      const ins = db.prepare("INSERT INTO consolidado_mensual(fuente,tecnico,sede_id,sede_texto,periodo,indicador,valor) VALUES (?,?,?,?,?,?,?)");
+      for (const f of r.filas) ins.run(fuente, r.tecnico, sedeId(f.sede_texto), f.sede_texto, f.periodo, f.indicador, f.valor);
+      Object.assign(resumen, { tecnico: r.tecnico, anio: r.anio, sedes: r.sedes, registros: r.filas.length, avisos: r.avisos });
+    } else throw bad("tipo debe ser «socializaciones» o «recoleccion»");
+    resumen.sedes_no_reconocidas = [...noReconocidas];
+    db.prepare("INSERT INTO sincronizaciones(fuente,archivo,resumen) VALUES (?,?,?)").run(b.tipo, archivo, JSON.stringify(resumen));
+    db.exec("COMMIT");
+  } catch (e) { db.exec("ROLLBACK"); throw e; }
+  return resumen;
+}
+
 function config() {
   return {
     marca: {
@@ -143,7 +173,12 @@ function cumplimiento(mes) {
   const evs = db.prepare("SELECT tipo,tecnico_id,sede_id,fecha,cantidad FROM evidencias WHERE substr(fecha,1,7)=?").all(mes);
   const tecnicos = db.prepare("SELECT id,nombre FROM tecnicos WHERE activo=1 ORDER BY nombre").all();
   const sedes = db.prepare("SELECT id,nombre FROM sedes WHERE activa=1 ORDER BY nombre").all();
-  return calcularCumplimiento({ mes, tipos, evs, tecnicos, sedes });
+  const r = calcularCumplimiento({ mes, tipos, evs, tecnicos, sedes });
+  const nCharlas = db.prepare("SELECT COUNT(*) n FROM consolidado_charlas WHERE substr(fecha,1,7)=?").get(mes).n;
+  const nEnc = db.prepare("SELECT COUNT(*) n, COALESCE(SUM(valor),0) v FROM consolidado_mensual WHERE periodo=? AND indicador='encuestas'").get(mes);
+  r.consolidado = { charla: nCharlas || null, encuesta_sg: nEnc.n ? nEnc.v : null };
+  r.sincronizado = db.prepare("SELECT creado FROM sincronizaciones ORDER BY id DESC LIMIT 1").get()?.creado ?? null;
+  return r;
 }
 
 async function api(req, res, url) {
@@ -175,6 +210,7 @@ async function api(req, res, url) {
   if (p.startsWith("/api/bot/")) {
     exigirBot(req);
     if (m === "GET" && p === "/api/bot/contexto") return json(res, { sedes: db.prepare("SELECT id,nombre FROM sedes WHERE activa=1").all(), tipos: db.prepare("SELECT clave,nombre,meta,alcance FROM tipos WHERE area='siau'").all() });
+    if (m === "POST" && p === "/api/bot/consolidados") return json(res, sincronizarConsolidado(await leerJson(req, 8e6)), 201);
     if (m === "POST" && p === "/api/bot/verificacion") {
       const b = await leerJson(req);
       if (!mesValido(b.periodo) || typeof b.resumen !== "object") throw bad("Datos inválidos");

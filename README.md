@@ -31,7 +31,23 @@ Primeros pasos en `/admin/`: *Logos* → *Sedes y técnicos* (pega las 40 sedes,
 - Meta **Global**: suma de todo el equipo en el mes. **Por técnico**: se exige a cada uno. Iniciales: charlas 200 y encuestas satisfacción/trazadora 90, ambas globales — **confirma si son por técnico** y cámbialo en *Metas*.
 - **Actas de buzón**: se espera un acta por sede cada viernes del mes; el visor lista las faltantes. Registra cada acta con tipo «Acta de apertura de buzón», la sede y la fecha del viernes.
 
-## Bot verificador de Drive
+## Enlace con los consolidados (Drive de siau@miredips.org)
+
+Los consolidados viven en el Drive **institucional**, así que el enlace corre **dentro de esa cuenta**: un script de Google ([`apps-script/EnlaceConsolidados.gs`](apps-script/EnlaceConsolidados.gs)) lee los archivos y envía los valores de las hojas a la plataforma (`POST /api/bot/consolidados`, con `BOT_TOKEN`). No hay claves de Google en este repositorio ni en el servidor, y no modifica nada en Drive. Instalación en el encabezado del archivo (≈5 minutos, una sola vez).
+
+| Archivo en Drive | Hoja que lee | Qué alimenta |
+|---|---|---|
+| `F_SIAU_031_CONSOLIDADO_SOCIALIZACIONES_MIRED_2026` (líder) | REGISTRO SOCIALIZACIONES | Charlas realizadas (meta mensual de charlas) |
+| «Plantilla de recolección de datos · SIAU» (uno por técnico) | CONFIG, SATISFACCION, MANIFESTACIONES USUARIOS, CHARLAS | Encuestas aplicadas (meta de encuestas), satisfechos, pregunta trazadora, manifestaciones y asistentes |
+
+- **Idempotente:** cada sincronización reemplaza lo leído de ese archivo; correcciones y filas borradas se reflejan y nada se duplica.
+- **El consolidado manda:** si hay datos oficiales del mes, el tablero los usa para el avance de las metas y muestra al lado cuántos tienen evidencia fotográfica.
+- **Los archivos deben ser Google Sheets.** Un `.xlsx` (como hoy el consolidado F-SIAU-031) se abre en Drive y se guarda con *Archivo → Guardar como Hoja de cálculo de Google*; el script avisa si encuentra uno.
+- **Sedes:** hay 40 (hoja LISTAS de los técnicos) pero el MAESTRO del consolidado de la líder trae 37; `sedes.mjs` las une con alias (p. ej. «P. FERRY» = «Paso El Ferry 1° de Mayo» = `PAS005`). **C. LA PLAYA, P. ROSOUR y P. VILLA NUEVA no figuran en el MAESTRO** y no tienen código; si un archivo trae una sede que no se reconoce, la respuesta de la sincronización la lista en `sedes_no_reconocidas` (no se descarta en silencio).
+- **Si la plantilla cambia de forma** (meses movidos de fila), el lector avisa y omite ese bloque en lugar de leer celdas equivocadas.
+- Pendiente de leer: NPS / médico asistencial, ludoteca, y el consolidado de actas de buzón.
+
+## Bot verificador de Drive (alternativa con cuenta de servicio)
 
 `bot/verificar.mjs` lista tres carpetas de Drive (actas, encuestas, charlas), asigna cada archivo a una sede y mes **por su ruta** y reporta faltantes; el resultado aparece en el visor.
 

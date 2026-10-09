@@ -11,7 +11,12 @@ export function viernesDelMes(mes) {
 }
 
 export const mesValido = (s) => /^\d{4}-(0[1-9]|1[0-2])$/.test(s ?? "");
-export const fechaValida = (s) => /^\d{4}-\d{2}-\d{2}$/.test(s ?? "") && !Number.isNaN(Date.parse(s));
+export const fechaValida = (s) => {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s ?? "");
+  if (!m) return false;
+  const u = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3]));
+  return u.getUTCFullYear() === +m[1] && u.getUTCMonth() === +m[2] - 1 && u.getUTCDate() === +m[3];
+};
 
 /** Detecta el tipo de imagen por firma; null si no es jpg/png/webp. */
 export function tipoImagen(buf) {
