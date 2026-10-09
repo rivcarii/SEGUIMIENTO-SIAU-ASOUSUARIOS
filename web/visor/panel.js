@@ -51,13 +51,17 @@ export async function vistaPanel(c, S, ir, render) {
     h("p", { class: "mini-t" }, "Evaluación médico asistencial"), segmentada([{ etq: "Promotores", valor: p.distribucion.medica.promotores, color: COLOR.prom }, { etq: "Pasivos", valor: p.distribucion.medica.pasivos, color: COLOR.pas }, { etq: "Detractores", valor: p.distribucion.medica.detractores, color: COLOR.det }], { vacio: "Sin respuestas" }));
 
   const orden = [...p.siau].sort((a, b) => (a.estado === "ausente") - (b.estado === "ausente") || a.avance - b.avance);
-  const matriz = figura("t7", "Avance por SIAU", "Porcentaje de la meta del mes. Pulse una fila para ver el detalle de esa persona",
-    h("div", { class: "avances" }, orden.map((t) => {
-      const ir_ = () => ir("cumplimiento", { siau: String(t.id) });
-      return h("div", { class: "fila-siau" + (t.estado === "ausente" ? " ausente" : ""), tabindex: t.estado === "ausente" ? null : 0, role: "button", onclick: t.estado === "ausente" ? null : ir_, onkeydown: (ev) => { if (ev.key === "Enter" && t.estado !== "ausente") ir_(); } },
-        h("span", { class: "nombre" }, nombreCorto(t.nombre), t.estado === "ausente" ? h("small", {}, "ausente este mes") : ""),
-        t.estado === "ausente" ? h("span", {}) : h("span", { class: "barras2" }, avance("Encuestas", t.encuestas, t.meta_encuestas), avance("Charlas", t.charlas, t.meta_charlas)));
-    })));
+  const barra2 = (valor, meta) => { const p = meta ? Math.round((100 * valor) / meta) : null, t = p == null ? "nd" : p >= 100 ? "ok" : p >= 60 ? "mid" : "low";
+    return h("span", { class: "av2 " + t, role: "img", "aria-label": p == null ? "sin meta" : p + " % de la meta" }, h("span", { class: "a-b" }, h("i", { style: `--w:${p == null ? 0 : Math.min(100, p)}%` })), h("b", { class: "num" }, p == null ? "—" : p + " %")); };
+  const matriz = figura("t7", "Avance por SIAU", "Porcentaje de la meta del mes · deslice la lista · pulse una fila para ver a esa persona",
+    h("div", { class: "lista-av", tabindex: 0, "aria-label": "Avance de cada SIAU (lista desplazable)" },
+      h("div", { class: "fila-siau cab" }, h("span", {}, "SIAU"), h("span", {}, "Encuestas"), h("span", {}, "Charlas")),
+      orden.map((t) => {
+        const ir_ = () => ir("cumplimiento", { siau: String(t.id) }), aus = t.estado === "ausente";
+        return h("div", { class: "fila-siau" + (aus ? " ausente" : ""), tabindex: aus ? null : 0, role: "button", onclick: aus ? null : ir_, onkeydown: (ev) => { if (ev.key === "Enter" && !aus) ir_(); } },
+          h("span", { class: "nombre" }, nombreCorto(t.nombre)), aus ? h("span", { class: "mut", style: "grid-column:2/4;font-size:12px" }, "ausente este mes") : [barra2(t.encuestas, t.meta_encuestas), barra2(t.charlas, t.meta_charlas)]);
+      })),
+    h("p", { class: "pie-fig" }, `${orden.length} SIAU · los más atrasados primero`));
 
   const top = p.sedes.slice(0, 8);
   const sedes = figura("t5", "Sedes con más actividad", "Encuestas + charlas del mes",

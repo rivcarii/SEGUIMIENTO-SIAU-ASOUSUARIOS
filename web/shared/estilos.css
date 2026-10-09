@@ -281,3 +281,15 @@ button.cifra{cursor:pointer;transition:background 160ms var(--ease-out)}@media(h
 .menores{align-items:baseline}
 .cifra .barra{height:8px;margin:8px 0 2px}.menores .chip-sede.suave{font-size:12px}
 .menores{margin:12px 4px 4px}
+
+/* Avance por SIAU: lista compacta con desplazamiento (una fila por persona) */
+.lista-av{max-height:360px;overflow-y:auto;overscroll-behavior:contain;margin:0 -8px;padding:0 8px;scrollbar-width:thin;scrollbar-color:rgba(6,93,126,.35) transparent;-webkit-mask-image:linear-gradient(#000 calc(100% - 22px),transparent);mask-image:linear-gradient(#000 calc(100% - 22px),transparent)}
+.lista-av:focus-visible{outline:2px solid var(--azul);outline-offset:2px;border-radius:12px}
+.lista-av .fila-siau{grid-template-columns:minmax(110px,30%) 1fr 1fr;gap:6px 14px;padding:6px 8px;align-items:center}
+.lista-av .fila-siau.cab{position:sticky;top:0;z-index:1;background:#f3f8f8;font:700 11px var(--mono);color:var(--mut);cursor:default;padding:4px 8px;border-radius:8px}
+.lista-av .fila-siau.cab:hover{background:#f3f8f8}
+.av2{display:grid;grid-template-columns:1fr 38px;gap:8px;align-items:center}.av2 b{text-align:right;font-size:12px}.av2.low b{color:#b3173a}.av2.ok b{color:#0d7a46}
+.av2 .a-b{height:8px;border-radius:99px;background:rgba(6,93,126,.1);overflow:hidden;display:block}.av2 .a-b i{display:block;height:100%;border-radius:inherit;background:var(--verde2)}.av2.mid .a-b i{background:var(--oro)}.av2.low .a-b i{background:var(--rojo)}.av2.nd .a-b i{background:#9aa9b0}
+@media(max-width:600px){.lista-av .fila-siau{grid-template-columns:1fr 1fr}.lista-av .fila-siau .nombre{grid-column:1/3}.lista-av .fila-siau.cab span:first-child{display:none}.lista-av .fila-siau.cab{grid-template-columns:1fr 1fr}}
+.av2 .a-b i{width:var(--w,0);animation:ancho 520ms var(--ease-out) both}
+@media(prefers-reduced-motion:reduce){.av2 .a-b i{animation:none}}
