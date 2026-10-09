@@ -1,4 +1,4 @@
-import { api, h, mesActual, fmtFecha, opciones, pintarMarca, mascota, tituloGrande, mesLegible, icono } from "/shared/comun.js";
+import { api, h, mesActual, fmtFecha, opciones, pintarMarca, mascota, tituloGrande, mesLegible } from "/shared/comun.js";
 
 const app = document.getElementById("app"), dlg = document.getElementById("dlg"), dlgc = document.getElementById("dlgc"), tabbar = document.getElementById("tabbar");
 const S = { cfg: null, area: "siau", vista: "cumplimiento", mes: mesActual(), filtros: {} };
@@ -17,7 +17,7 @@ async function iniciar() {
 
 function login() {
   const pw = h("input", { type: "password", autocomplete: "current-password", required: true }), msg = h("div");
-  app.replaceChildren(h("div", { class: "login" }, mascota(170), h("form", { class: "card", onsubmit: async (ev) => {
+  app.replaceChildren(h("div", { class: "login" }, mascota("bienvenida", 190), h("form", { class: "card", onsubmit: async (ev) => {
     ev.preventDefault();
     try { await api("/api/login", { json: { password: pw.value } }); location.reload(); }
     catch (e) { msg.replaceChildren(h("div", { class: "msg err" }, e.message)); }
@@ -30,16 +30,17 @@ function montar() {
   segThumb = h("i", { class: "thumb" });
   seg = h("div", { class: "seg glass", role: "tablist" }, segThumb);
   cont = h("div");
-  app.replaceChildren(tg.el, seg, cont, h("p", { class: "pie" }, h("img", { src: "/shared/marca/medalla.png", alt: "" }), "SIAU · Subproceso de Gestión de la Calidad · MiRed IPS"));
+  app.replaceChildren(tg.el, seg, cont);
 
   tabThumb = h("i", { class: "thumb" });
   tabbar.style.setProperty("--n", AREAS.length);
   tabbar.replaceChildren(tabThumb, ...AREAS.map((a) => h("button", { role: "tab", "data-area": a, onclick: () => { if (S.area !== a) { S.area = a; S.filtros = {}; S.vista = a === "siau" ? "cumplimiento" : "evidencias"; render(); } } },
-    a === "siau" ? h("img", { src: "/shared/marca/medalla.png", alt: "" }) : icono("usuarios"), S.cfg.marca[a === "siau" ? "nombre_siau" : "nombre_asociacion"])));
+    h("img", { src: a === "siau" ? "/shared/marca/medalla.png" : "/shared/marca/asociacion-icono.png", alt: "" }), S.cfg.marca[a === "siau" ? "nombre_siau" : "nombre_asociacion"])));
   tabbar.hidden = false;
 }
 
 function render() {
+  pintarMarca(S.cfg.marca, S.area);
   tabbar.style.setProperty("--i", AREAS.indexOf(S.area));
   for (const b of tabbar.querySelectorAll("button")) b.setAttribute("aria-selected", b.dataset.area === S.area);
   tg.kicker.textContent = "Cuaderno de evidencias · 2026";
@@ -77,7 +78,8 @@ async function vistaCumplimiento(c) {
   const titulo = prom == null ? "Aún no hay metas configuradas." : prom >= 100 ? "¡Metas del mes cumplidas!" : `Llevamos ${prom}% de las metas de ${mesLegible(d.mes)}.`;
   const detalle = [...conMeta.map((t) => `${t.nombre.split(" ")[0]} ${t.total}/${t.meta}`), d.actas.length && `Actas al día ${alDia}/${d.actas.length} sedes`].filter(Boolean).join(" · ");
 
-  const hero = h("div", { class: "hero" }, mascota(), h("div", { class: "card glass globo" }, h("div", { class: "titulo" }, titulo), h("div", { class: "detalle" }, detalle)));
+  const pose = prom == null ? "siau" : prom >= 100 ? "pulgar" : prom < 60 ? "dardo" : "siau";
+  const hero = h("div", { class: "hero" }, mascota(pose), h("div", { class: "card glass globo" }, h("div", { class: "titulo" }, titulo), h("div", { class: "detalle" }, detalle)));
 
   const metas = h("div", { class: "grid" }, conMeta.map((t, i) => h("div", { class: "card", style: delay(i) },
     h("div", { class: "mut" }, t.nombre),
@@ -129,7 +131,7 @@ function vistaEvidencias(c) {
     lista.append(...r.items.map((e, i) => tarjeta(e, base === 0 ? i : 0)));
     offset += r.items.length;
     pie.replaceChildren(offset < r.total ? h("button", { class: "btn sec", onclick: () => cargar(false) }, `Ver más (${r.total - offset})`)
-      : r.total ? h("span", { class: "leyenda" }, `${r.total} muestra(s)`) : h("div", { class: "vacio" }, mascota(120), "No hay muestras con estos filtros."));
+      : r.total ? h("span", { class: "leyenda" }, `${r.total} muestra(s)`) : h("div", { class: "vacio" }, mascota("manos", 130), "No hay muestras con estos filtros."));
   }
   cargar(true);
 }

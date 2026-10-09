@@ -10,4 +10,8 @@ Tomado del artefacto «Portafolio de imagen · SIAU» (subproceso de Gestión de
 
 **Reglas de uso (del portafolio):** primero MiRed IPS y después el logo del área; versión color/azul/negra sobre fondos claros y blanca sobre oscuros; no deformar, no cambiar colores ni letras; dejar alrededor un margen igual al diámetro de la medalla.
 
-**Mascota:** `mascota.png`, el doctor de MiRed IPS (tomado de la plantilla de diapositivas SIAU de Drive).
+**Jerarquía de logos (encabezado):** MiRed IPS (pequeño) → Gestión de la Calidad (el proceso) → **SIAU, el protagonista y el más grande**. En el módulo de la Asociación de Usuarios: MiRed IPS → logo de la Asociación. Archivos: `calidad-*.png`, `mired*.png`, `asociacion.png`, `asociacion-icono.png`.
+
+**Pie institucional (siempre abajo):** Vigilado Supersalud y Alcaldía de Barranquilla (`supersalud.png`, `alcaldia.png`) sobre pastillas blancas, en una banda de azul MiRed con los tres puntos de la marca (rojo, amarillo, verde).
+
+**Mascota Killo:** `killo-*.webp` (pulgar, explica, atento, bienvenida, manos, celular, dardo y `killo-siau` con megáfono). Hero de Cumplimiento: pulgar si las metas están al 100 %, dardo si van por debajo del 60 %, megáfono SIAU en el resto; bienvenida en el acceso del visor; celular en el acceso del administrador; manos cuando no hay muestras.

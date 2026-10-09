@@ -17,7 +17,7 @@ async function iniciar() {
 
 function login() {
   const pw = h("input", { type: "password", autocomplete: "current-password", required: true }), msg = h("div");
-  app.replaceChildren(h("div", { class: "login" }, mascota(170), h("form", { class: "card", onsubmit: async (ev) => {
+  app.replaceChildren(h("div", { class: "login" }, mascota("celular", 190), h("form", { class: "card", onsubmit: async (ev) => {
     ev.preventDefault();
     try { await api("/api/login", { json: { password: pw.value } }); iniciar(); } catch (e) { aviso(msg, false, e.message); }
   } }, h("h2", {}, "Acceso administrador"), h("label", {}, "Contraseña"), pw, msg, h("p", {}, h("button", { class: "btn" }, "Entrar")))));

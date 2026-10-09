@@ -129,7 +129,7 @@ function config() {
       nombre_siau: ajuste("nombre_siau", "SIAU"),
       nombre_asociacion: ajuste("nombre_asociacion", "Asociación de Usuarios"),
       logo_siau: ajuste("logo_siau") ? `/uploads/${ajuste("logo_siau")}` : "/shared/marca/siau-color.png",
-      logo_asociacion: ajuste("logo_asociacion") ? `/uploads/${ajuste("logo_asociacion")}` : null,
+      logo_asociacion: ajuste("logo_asociacion") ? `/uploads/${ajuste("logo_asociacion")}` : "/shared/marca/asociacion.png",
     },
     tipos: db.prepare("SELECT * FROM tipos ORDER BY area, rowid").all(),
     sedes: db.prepare("SELECT * FROM sedes ORDER BY nombre").all(),

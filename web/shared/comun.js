@@ -29,15 +29,18 @@ export function opciones(sel, lista, valor = "id", texto = "nombre", vacio = "To
   sel.replaceChildren(h("option", { value: "" }, vacio), ...lista.map((x) => h("option", { value: x[valor] }, x[texto])));
 }
 
-/** Logos según el portafolio: primero MiRed IPS, después el logo del área. */
-export function pintarMarca(marca) {
-  const logos = document.getElementById("logos");
-  logos.replaceChildren(h("img", { src: "/shared/marca/mired.png", alt: "MiRed IPS" }), h("span", { class: "sep" }));
-  logos.append(h("img", { class: "siau", src: marca.logo_siau, alt: marca.nombre_siau }));
-  if (marca.logo_asociacion) logos.append(h("span", { class: "sep" }), h("img", { class: "siau", src: marca.logo_asociacion, alt: marca.nombre_asociacion }));
+/** Logos: MiRed IPS (pequeño) → Gestión de la Calidad (proceso) → SIAU (protagonista, el más grande). */
+export function pintarMarca(marca, area = "siau") {
+  const sep = () => h("span", { class: "sep" });
+  document.getElementById("logos").replaceChildren(
+    h("img", { class: "mired", src: "/shared/marca/mired.png", alt: "MiRed IPS" }), sep(),
+    ...(area === "siau"
+      ? [h("img", { class: "calidad", src: "/shared/marca/calidad-azul.png", alt: "Gestión de la Calidad" }), sep(), h("img", { class: "principal", src: marca.logo_siau, alt: marca.nombre_siau })]
+      : [h("img", { class: "principal aso", src: marca.logo_asociacion, alt: marca.nombre_asociacion })]));
 }
 
-export const mascota = (alto) => h("img", { class: "mascota", src: "/shared/marca/mascota.png", alt: "", style: alto ? `height:${alto}px` : null });
+/** Killo, la mascota de MiRed: pulgar, explica, atento, bienvenida, manos, celular, dardo, siau (megáfono). */
+export const mascota = (pose, alto) => h("img", { class: "mascota", src: `/shared/marca/killo-${pose}.webp`, alt: "", style: alto ? `height:${alto}px` : null });
 
 /** Título grande estilo iOS: al salir de pantalla, el título pasa a la barra superior. */
 export function tituloGrande(kicker, titulo) {
@@ -51,11 +54,3 @@ export function tituloGrande(kicker, titulo) {
 
 export const mesLegible = (m) => new Date(m + "-15T12:00:00").toLocaleDateString("es-CO", { month: "long", year: "numeric" });
 
-const ICONOS = {
-  usuarios: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3.2"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6"/><circle cx="17" cy="9" r="2.4"/><path d="M16.5 14.2c2.6.2 4.5 2.4 4.5 5.3"/></svg>',
-};
-export function icono(nombre) {
-  const t = document.createElement("template");
-  t.innerHTML = ICONOS[nombre];
-  return t.content.firstChild;
-}

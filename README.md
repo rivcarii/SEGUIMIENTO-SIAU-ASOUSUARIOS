@@ -20,7 +20,7 @@ npm test
 
 Datos y fotos quedan en `DATA_DIR` (por defecto `data/`): **respáldalo** o monta un volumen persistente; es lo que evita perder las evidencias.
 
-Interfaz: estilo Liquid Glass (iOS 26/27) con estética de cuaderno de laboratorio —muestras numeradas, figuras y tablas con leyenda— y la mascota doctor de MiRed como guía. Respeta `prefers-reduced-motion`.
+Interfaz: estilo Liquid Glass (iOS 26/27) con estética de cuaderno de laboratorio —muestras numeradas, figuras y tablas con leyenda— y Killo, la mascota de MiRed, como guía. Respeta `prefers-reduced-motion`.
 
 Identidad visual: sigue el «Portafolio de imagen · SIAU» (logos, paleta y tipografía en `web/shared/marca/`, ver su README). El logo de la Asociación de Usuarios se sube desde *Logos* cuando esté listo.
 
