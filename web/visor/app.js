@@ -137,12 +137,21 @@ async function vistaCumplimiento(c) {
 
   const ac = d.actas_consolidado;
   const mias = S.siau && filas[0] ? filas[0].actas : null;
-  const actas = mias ? h("div", { class: "card scroll" }, h("p", { class: "mut", style: "margin:0 0 8px" }, `${mias.entregadas} de ${mias.esperadas} actas entregadas hasta hoy en sus sedes.`),
-    mias.pendientes.length ? h("table", { class: "cient" }, h("thead", {}, h("tr", {}, h("th", {}, "Sede"), h("th", {}, "Acta pendiente"))),
-      h("tbody", {}, mias.pendientes.map((p) => h("tr", {}, h("td", {}, p.sede), h("td", { class: "num" }, `${p.codigo} (${fmtFecha(p.fecha)})`))))) : h("p", {}, "Está al día con sus actas.")) : ac ? h("div", { class: "card scroll" },
-    h("p", { class: "mut", style: "margin:0 0 8px" }, `${ac.entregadas} de ${ac.esperadas} actas entregadas hasta hoy (${ac.codigos.join(", ") || "—"}). El calendario sale del propio consolidado.`),
-    ac.sedes_pendientes.length ? h("table", { class: "cient" }, h("thead", {}, h("tr", {}, h("th", {}, "Sede"), h("th", {}, "Actas pendientes"))),
-      h("tbody", {}, ac.sedes_pendientes.map((x) => h("tr", {}, h("td", {}, x.sede), h("td", { class: "num" }, x.pendientes.map((p) => `${p.codigo} (${fmtFecha(p.fecha)})`).join(", ")))))) : h("p", {}, "Todas las sedes están al día."))
+  /** Panel de actas de buzón: cuánto va entregado, cada acta del calendario y las sedes en pastillas (las pendientes primero, con su cuenta). */
+  const panelActas = (esperadas, entregadas, porCodigo, pendientes, alDia, vacioTxt) => {
+    const p = esperadas ? Math.round((100 * entregadas) / esperadas) : 0, detalle = h("p", { class: "acta-detalle", "aria-live": "polite" }, "Pulse una sede para ver qué actas debe.");
+    const pill = (x, al) => h("button", { type: "button", class: "pill-sede " + (al ? "ok" : "debe"), onclick: () => { detalle.textContent = al ? `${x.sede}: al día con todas las actas.` : `${x.sede} debe: ${x.pendientes.map((q) => `${q.codigo} (${fmtFecha(q.fecha)})`).join(" · ")}`; } },
+      h("span", { class: "pt" }, al ? "✓" : String(x.pendientes.length)), x.sede);
+    return h("div", { class: "card actas" },
+      h("div", { class: "actas-cab" }, h("div", { class: "actas-pct", "aria-hidden": "true", style: `--p:${p}` }, h("b", {}, p), h("small", {}, "%")),
+        h("div", {}, h("div", { class: "big" }, entregadas, h("small", {}, ` de ${esperadas} actas entregadas`)), h("div", { class: "barra " + clase(p), role: "img", "aria-label": `${p}% entregado` }, h("i", { style: `transform:scaleX(${p / 100})` })), h("p", { class: "mut", style: "margin:6px 0 0;font-size:13px" }, "Solo cuentan las actas cuya fecha ya pasó."))),
+      porCodigo.length ? h("div", { class: "por-codigo" }, porCodigo.map((c) => { const q = c.esperadas ? Math.round((100 * c.entregadas) / c.esperadas) : 0; return h("div", { class: "cod" }, h("span", { class: "c-n" }, c.codigo, h("small", {}, fmtFecha(c.fecha))), h("span", { class: "barra " + clase(q), role: "img", "aria-label": `${c.codigo}: ${q}%` }, h("i", { style: `transform:scaleX(${q / 100})` })), h("b", { class: "num" }, `${c.entregadas}/${c.esperadas}`)); })) : "",
+      pendientes.length ? h("div", {}, h("h3", { class: "mini-t" }, `Sedes con actas pendientes (${pendientes.length})`), h("div", { class: "pills" }, pendientes.map((x) => pill(x, false)))) : h("div", { class: "msg ok" }, vacioTxt),
+      alDia.length ? h("details", { class: "al-dia" }, h("summary", {}, `Sedes al día (${alDia.length})`), h("div", { class: "pills" }, alDia.map((n) => pill({ sede: n }, true)))) : "",
+      detalle);
+  };
+  const actas = mias ? panelActas(mias.esperadas, mias.entregadas, [], [...new Map(mias.pendientes.map((x) => [x.sede, { sede: x.sede, pendientes: mias.pendientes.filter((y) => y.sede === x.sede) }])).values()], [], "¡Está al día con sus actas!")
+    : ac ? panelActas(ac.esperadas, ac.entregadas, ac.por_codigo ?? [], [...ac.sedes_pendientes].sort((x, y) => y.pendientes.length - x.pendientes.length || x.sede.localeCompare(y.sede, "es")), ac.al_dia ?? [], "Todas las sedes están al día.")
     : h("div", { class: "card" }, h("p", { class: "mut" }, "Aún no se ha sincronizado el consolidado de buzón."));
 
   const l = d.lsc;

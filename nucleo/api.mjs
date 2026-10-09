@@ -144,6 +144,10 @@ export function crearNucleo({ almacen, fotos, hoy = () => new Date().toLocaleDat
       sedes_pendientes: [...new Set(vencidas.filter((a) => a.estado !== "entregado").map((a) => a.sede_id ?? a.sede_texto))]
         .map((k) => ({ sede: nombre.get(k) ?? String(k), pendientes: vencidas.filter((a) => (a.sede_id ?? a.sede_texto) === k && a.estado !== "entregado").map((a) => ({ codigo: a.codigo, fecha: a.fecha, estado: a.estado })) }))
         .sort((x, y) => enOrden(x.sede, y.sede)),
+      // Cada acta del calendario (código + fecha): cuántas sedes la entregaron
+      por_codigo: [...new Set(vencidas.map((a) => `${a.fecha}|${a.codigo}`))].sort().map((k) => { const [fecha, codigo] = k.split("|"), l = vencidas.filter((a) => a.fecha === fecha && a.codigo === codigo); return { codigo, fecha, esperadas: l.length, entregadas: l.filter((a) => a.estado === "entregado").length }; }),
+      // Sedes que no deben nada de lo vencido
+      al_dia: [...new Set(vencidas.map((a) => a.sede_id ?? a.sede_texto))].filter((k) => !vencidas.some((a) => (a.sede_id ?? a.sede_texto) === k && a.estado !== "entregado")).map((k) => nombre.get(k) ?? String(k)).sort(enOrden),
     } : null;
 
     const lsc = mensual.filter((m) => m.indicador.startsWith("lsc_")), porSede = new Map();

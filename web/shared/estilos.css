@@ -303,3 +303,18 @@ button.cifra{cursor:pointer;transition:background 160ms var(--ease-out)}@media(h
 .top5 .a-b{height:7px;border-radius:99px;background:rgba(6,93,126,.1);overflow:hidden;display:block;margin-top:2px}.top5 .a-b i{display:block;height:100%;width:var(--w,0);background:var(--verde2);border-radius:inherit;animation:ancho 520ms var(--ease-out) both}
 .top5 .pts{font-size:20px;color:var(--azul)}.top5 .pts small{font-size:12px;color:var(--mut);font-weight:600}
 @media(prefers-reduced-motion:reduce){.top5 li,.top5 .a-b i{animation:none}}
+/* Actas de buzón */
+.actas{display:grid;gap:18px}.actas-cab{display:flex;gap:18px;align-items:center}.actas-cab>div:last-child{flex:1;min-width:0}
+.actas-pct{flex:0 0 92px;height:92px;border-radius:50%;display:grid;place-content:center;text-align:center;background:conic-gradient(var(--azul) calc(var(--p,0)*1%),rgba(6,93,126,.12) 0);position:relative}
+.actas-pct::before{content:"";position:absolute;inset:9px;border-radius:50%;background:#fbfdfd}.actas-pct b,.actas-pct small{position:relative}.actas-pct b{font:900 28px/1 var(--fuente);color:var(--azul)}.actas-pct small{font-size:12px;color:var(--mut)}
+.actas-cab .barra{height:10px}
+.por-codigo{display:grid;gap:8px}.cod{display:grid;grid-template-columns:120px 1fr 52px;gap:12px;align-items:center}.cod .c-n{font:800 14px var(--mono);color:var(--tx)}.cod .c-n small{display:block;font:600 11px var(--fuente);color:var(--mut)}.cod .barra{margin:0;height:10px}.cod b{text-align:right;font-size:13px}
+.pills{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+.pill-sede{display:inline-flex;align-items:center;gap:8px;border:1px solid transparent;border-radius:999px;padding:5px 12px 5px 6px;font:700 13px var(--fuente);cursor:pointer;transition:transform 140ms var(--ease-out),box-shadow 140ms var(--ease-out);min-height:34px}
+.pill-sede:active{transform:scale(.97)}@media(hover:hover) and (pointer:fine){.pill-sede:hover{box-shadow:0 2px 8px rgba(4,58,77,.15)}}
+.pill-sede .pt{min-width:22px;height:22px;border-radius:50%;display:grid;place-items:center;font:800 12px var(--mono);color:#fff}
+.pill-sede.debe{background:rgba(217,38,74,.08);color:#7d1226;border-color:rgba(217,38,74,.28)}.pill-sede.debe .pt{background:#d9264a}
+.pill-sede.ok{background:rgba(31,157,98,.1);color:#0b5a35;border-color:rgba(31,157,98,.28)}.pill-sede.ok .pt{background:#1f9d62}
+.al-dia summary{cursor:pointer;font-weight:800;color:#0b5a35;padding:6px 0}.al-dia summary:focus-visible{outline:2px solid var(--azul);border-radius:6px}
+.acta-detalle{margin:0;padding:10px 14px;border-radius:12px;background:rgba(6,93,126,.07);font-size:14px;min-height:42px}
+@media(max-width:600px){.cod{grid-template-columns:90px 1fr 48px}.actas-pct{flex-basis:76px;height:76px}.actas-pct b{font-size:22px}}

@@ -90,3 +90,13 @@ test("top 5: ordena por promedio de % de encuestas y charlas (topado en 100), si
   const sin = api("GET", "/api/panel", { q: { mes: "2025-01" }, rol: "visor" }).top;
   assert.deepEqual(sin, []);
 });
+
+test("actas de buzón: resumen por acta del calendario y sedes al día / con pendientes", () => {
+  const { api, nucleo } = nuevoNucleo();
+  nucleo.sincronizar({ tipo: "buzon", archivo: "CONS_BUZON", hojas: { SEPTIEMBRE_2026: [["SEDES", "SEPTIEMBRE"], ["DIA", "04(B036)", "11(B037)", "18(B038)"],
+    ["C. MURILLO", "ENTREGADO", "ENTREGADO", ""], ["C. LA MANGA", "ENTREGADO", "", ""], ["P. LAS PALMAS", "ENTREGADO", "ENTREGADO", ""]] } });
+  const a = api("GET", "/api/cumplimiento", { q: { mes: "2026-09", hoy: "2026-09-15" } }).actas_consolidado;
+  assert.deepEqual(a.por_codigo.map((c) => [c.codigo, c.entregadas, c.esperadas]), [["B036", 3, 3], ["B037", 2, 3]]); // B038 aún no vence
+  assert.deepEqual(a.al_dia, ["C. MURILLO", "P. LAS PALMAS"]);
+  assert.deepEqual(a.sedes_pendientes.map((x) => x.sede), ["C. LA MANGA"]);
+});
