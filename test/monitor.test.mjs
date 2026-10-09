@@ -78,3 +78,15 @@ test("monitor de punta a punta: detecta fuentes faltantes y publica el resumen e
     assert.equal(readFileSync(new URL("../informe.md", import.meta.url), "utf8").includes("SEDE INVENTADA"), true);
   });
 });
+
+test("arranque amigable: iniciar.mjs levanta la plataforma", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "ini-"));
+  const puerto = 3500 + Math.floor(Math.random() * 90);
+  const p = spawn(process.execPath, ["iniciar.mjs"], { cwd: new URL("..", import.meta.url), env: { ...process.env, PORT: String(puerto), DATA_DIR: dir, ADMIN_PASSWORD: "x" }, stdio: "ignore" });
+  try {
+    let ok = false;
+    for (let i = 0; i < 50 && !ok; i++) { try { ok = (await fetch(`http://localhost:${puerto}/api/salud`)).ok; } catch { await new Promise((r) => setTimeout(r, 100)); } }
+    assert.ok(ok);
+    assert.equal((await fetch(`http://localhost:${puerto}/admin/`)).status, 200);
+  } finally { p.kill(); }
+});

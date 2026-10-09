@@ -1,7 +1,14 @@
 # Puesta en marcha
 
-> **Para empezar a ver datos ya:** ejecute la plataforma (`ADMIN_PASSWORD=… npm start`) y use *Administrador → Importar consolidados*. Lo de abajo es para **automatizarlo** (servidor público + script de Google), ≈30 minutos, una sola vez.
-
+> **Para empezar a ver datos ya (en su computador):**
+> 1. Instale **Node.js** (versión «LTS», 22 o superior) desde <https://nodejs.org>.
+> 2. En GitHub: botón verde **Code → Download ZIP**; descomprima la carpeta.
+> 3. Haga **doble clic en `iniciar.bat`** (Windows) o en `iniciar.command` (Mac). La primera vez le pide una contraseña de administrador y abre el navegador en `http://localhost:3000/admin/`. **No cierre la ventana negra mientras la use.**
+> 4. En *Importar consolidados* suba los archivos Excel.
+>
+> Si el navegador dice «no se puede acceder»: la ventana negra está cerrada o no arrancó; léale el mensaje (suele decir que falta Node.js o que es una versión antigua).
+>
+> Lo de abajo es para **automatizarlo y que lo vea todo el equipo** (servidor público + script de Google), ≈30 minutos, una sola vez.
 Orden: **1) publicar la plataforma → 2) secretos del repositorio → 3) script en la cuenta siau@miredips.org → 4) comprobar.**
 
 ## 1. Publicar la plataforma

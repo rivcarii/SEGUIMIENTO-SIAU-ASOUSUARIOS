@@ -5,7 +5,7 @@
   "type": "module",
   "description": "Visor + administrador de evidencias (SIAU y Asociación de Usuarios) y bot verificador de Drive. Sin dependencias.",
   "scripts": {
-    "start": "node server.mjs",
+    "start": "node iniciar.mjs",
     "monitor": "node bot/monitor.mjs",
     "test": "node --test test/*.test.mjs"
   },
