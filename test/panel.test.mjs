@@ -75,3 +75,18 @@ test("documentos PDF: se adjuntan junto a las fotos, se listan por álbum y se l
   assert.equal(fotos.existe(f), true);
   assert.equal(api("GET", "/api/panel", { q: { mes: "2026-09" } }).resumen.evidencias.total, 1);
 });
+
+test("top 5: ordena por promedio de % de encuestas y charlas (topado en 100), sin ausentes ni quien aún no suma", () => {
+  const { api, nucleo } = nuevoNucleo({ rotacion: true });
+  const nps = (sede, n) => Array.from({ length: n }, (_, i) => [`0${1 + (i % 9)}/09/2026 10:00:00`, sede, "", "10"]);
+  nucleo.sincronizar({ tipo: "nps", archivo: "NPS", hojas: { "Respuestas de formulario 1": [["Marca temporal", "SEDE QUE CONSULTÓ:", "x", "probabilidad"], ...nps("C. MURILLO", 45), ...nps("C. LA MANGA", 90), ...nps("C. NAZARETH", 12)] } });
+  nucleo.sincronizar({ tipo: "charlas_matriz", archivo: "CONS_CHARLAS_2026", anio: 2026, hojas: { "CHARLAS USUARIOS": [["x"], ["SEDES", "SEPTIEMBRE"], ["C. MURILLO", "300"], ["C. LA MANGA", "100"]] } });
+  const top = api("GET", "/api/panel", { q: { mes: "2026-09" }, rol: "visor" }).top;
+  // Horacio (Murillo): 22,5 enc. de 90 = 25 % y 150 de 200 → 75 %; Nira (La Manga): 45 de 90 = 50 % y 50 de 200 = 25 %
+  assert.ok(top.length >= 2 && top.length <= 5);
+  assert.deepEqual(top.map((t) => t.puesto), top.map((_, i) => i + 1));
+  assert.ok(top.every((t, i) => i === 0 || top[i - 1].puntaje >= t.puntaje));
+  assert.ok(top.every((t) => t.puntaje > 0 && t.puntaje <= 100));
+  const sin = api("GET", "/api/panel", { q: { mes: "2025-01" }, rol: "visor" }).top;
+  assert.deepEqual(sin, []);
+});

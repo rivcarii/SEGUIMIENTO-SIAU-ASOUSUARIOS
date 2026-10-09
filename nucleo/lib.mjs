@@ -93,9 +93,12 @@ export function calcularPorTecnico({ mes, hoy, tecnicos, asignaciones, ausencias
     const ausenciasMes = ausencias.filter((a) => a.tecnico_id === t.id && a.desde <= fin && a.hasta >= inicio);
     const pct = (v, m) => (m > 0 ? Math.min(100, Math.round((100 * v) / m)) : 100);
     const avance = Math.min(pct(enc, metaEnc), pct(ch, metaCh));
+    // Puntaje para el ranking: promedio del % de encuestas y del % de charlas, cada uno topado en 100 (pasarse de la meta no suma extra)
+    const partes = [[enc, metaEnc], [ch, metaCh]].filter(([, m]) => m > 0).map(([v, m]) => Math.min(100, (100 * v) / m));
+    const puntaje = f === 0 || !partes.length ? null : Math.round((10 * partes.reduce((a, b) => a + b, 0)) / partes.length) / 10;
     const cumple = (metaEnc == null || enc >= metaEnc) && (metaCh == null || ch >= metaCh);
     return {
-      estado: f === 0 ? "ausente" : cumple ? "cumple" : avance >= 60 ? "camino" : "atencion", avance,
+      estado: f === 0 ? "ausente" : cumple ? "cumple" : avance >= 60 ? "camino" : "atencion", avance, puntaje,
       tecnico_id: t.id, nombre: t.nombre, sedes: mis.map((id) => nombreSede.get(id)).filter(Boolean).sort(),
       dias_activos: Math.round(f * D), dias_mes: D, ausente: f === 0, ausencias: ausenciasMes,
       encuestas: { valor: enc, meta: metaEnc, cumple: metaEnc == null ? null : enc >= metaEnc, nps: encNps, medica: encMed },

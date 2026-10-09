@@ -28,6 +28,7 @@ export async function vistaPanel(c, S, ir, render) {
   const mes = h("input", { type: "month", value: S.mes, "aria-label": "Mes", onchange: () => { S.mes = mes.value || S.mes; render(); } });
   const sinDatos = !r.encuestas.valor && !r.charlas.valor && !(r.actas?.esperadas);
 
+  const t5Pie = (p) => (p.top.length ? `${p.top.filter((t) => t.puntaje >= 100).length} de los ${p.top.length} ya cumplen sus dos metas` : "");
   const franja = h("div", { class: "franja" },
     cifra("SIAU que cumplen", e.cumple, base, e.ausente ? `${e.ausente} ausente(s) sin evaluar` : "Todos activos", tono(base ? (100 * e.cumple) / base : null), () => ir("cumplimiento")),
     cifra("Encuestas", miles(r.encuestas.valor), r.encuestas.meta ? miles(r.encuestas.meta) : null, `NPS ${miles(r.encuestas.nps)} · médica ${miles(r.encuestas.medica)}`, tono(pct(r.encuestas.valor, r.encuestas.meta)), () => ir("cumplimiento")),
@@ -50,6 +51,13 @@ export async function vistaPanel(c, S, ir, render) {
     h("p", { class: "mini-t" }, "Satisfacción (NPS)"), segmentada([{ etq: "Promotores", valor: p.distribucion.nps.promotores, color: COLOR.prom }, { etq: "Pasivos", valor: p.distribucion.nps.pasivos, color: COLOR.pas }, { etq: "Detractores", valor: p.distribucion.nps.detractores, color: COLOR.det }], { vacio: "Sin respuestas" }),
     h("p", { class: "mini-t" }, "Evaluación médico asistencial"), segmentada([{ etq: "Promotores", valor: p.distribucion.medica.promotores, color: COLOR.prom }, { etq: "Pasivos", valor: p.distribucion.medica.pasivos, color: COLOR.pas }, { etq: "Detractores", valor: p.distribucion.medica.detractores, color: COLOR.det }], { vacio: "Sin respuestas" }));
 
+  const top5 = figura("t5", "Top 5 del mes", "Mayor cumplimiento: promedio del % de encuestas y de charlas (tope 100 %)",
+    p.top.length ? h("ol", { class: "top5" }, p.top.map((t, i) => h("li", { class: "clic", style: `--i:${i}`, tabindex: 0, onclick: () => ir("cumplimiento", { siau: String(t.id) }), onkeydown: (ev) => { if (ev.key === "Enter") ir("cumplimiento", { siau: String(t.id) }); } },
+      h("span", { class: "puesto p" + t.puesto, "aria-label": "Puesto " + t.puesto }, t.puesto),
+      h("span", { class: "quien" }, h("b", {}, nombreCorto(t.nombre)), h("small", {}, `Enc. ${t.encuestas}${t.meta_encuestas ? "/" + t.meta_encuestas : ""} · Charlas ${t.charlas}${t.meta_charlas ? "/" + t.meta_charlas : ""}${t.actas ? " · Actas " + t.actas : ""}`),
+        h("span", { class: "a-b", role: "img", "aria-label": `Puntaje ${t.puntaje} %` }, h("i", { style: `--w:${Math.min(100, t.puntaje)}%` }))),
+      h("b", { class: "num pts" }, t.puntaje, h("small", {}, " %"))))) : h("p", { class: "mut" }, "Todavía nadie suma avance en este mes."),
+    h("p", { class: "pie-fig" }, t5Pie(p)));
   const orden = [...p.siau].sort((a, b) => (a.estado === "ausente") - (b.estado === "ausente") || a.avance - b.avance);
   const barra2 = (valor, meta) => { const p = meta ? Math.round((100 * valor) / meta) : null, t = p == null ? "nd" : p >= 100 ? "ok" : p >= 60 ? "mid" : "low";
     return h("span", { class: "av2 " + t, role: "img", "aria-label": p == null ? "sin meta" : p + " % de la meta" }, h("span", { class: "a-b" }, h("i", { style: `--w:${p == null ? 0 : Math.min(100, p)}%` })), h("b", { class: "num" }, p == null ? "—" : p + " %")); };
@@ -64,13 +72,13 @@ export async function vistaPanel(c, S, ir, render) {
     h("p", { class: "pie-fig" }, `${orden.length} SIAU · los más atrasados primero`));
 
   const top = p.sedes.slice(0, 8);
-  const sedes = figura("t5", "Sedes con más actividad", "Encuestas + charlas del mes",
+  const sedes = figura("t12", "Sedes con más actividad", "Encuestas + charlas del mes",
     top.length ? barrasH(top.map((x) => ({ etq: x.sede, valor: x.encuestas + x.charlas, nota: `${miles(x.encuestas)} enc. · ${miles(x.charlas)} ch.` })), { color: COLOR.nps }) : h("p", { class: "mut" }, "Sin datos de sedes para este mes."),
     p.evidencias_tipo.length ? h("div", { style: "margin-top:22px" }, h("p", { class: "mini-t" }, "Evidencias registradas este mes"), barrasH(p.evidencias_tipo.map((x) => ({ etq: x.tipo, valor: x.n })), { color: COLOR.lsc })) : "");
 
   c.replaceChildren(
     h("div", { class: "filters" }, h("label", { style: "margin:0" }, "Mes"), mes, h("button", { class: "btn sec", onclick: () => ir("consultas") }, "Hacer una consulta")),
     ...(sinDatos ? [h("div", { class: "msg" }, "Este mes todavía no tiene datos. Pruebe con otro mes o actualice los consolidados desde el Administrador.")] : []),
-    franja, menores, h("div", { class: "tablero" }, encPorMes, estados, chaPorMes, dist, matriz, sedes),
+    franja, menores, h("div", { class: "tablero" }, encPorMes, top5, chaPorMes, estados, matriz, dist, sedes),
     h("p", { class: "leyenda" }, h("b", {}, "Nota."), " Las encuestas de cada SIAU suman NPS y evaluación médica; las charlas cuentan asistentes. Lo registrado en cada sede se reparte entre quienes la atienden."));
 }

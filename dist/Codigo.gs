@@ -212,9 +212,12 @@ function calcularPorTecnico({ mes, hoy, tecnicos, asignaciones, ausencias, sedes
     const ausenciasMes = ausencias.filter((a) => a.tecnico_id === t.id && a.desde <= fin && a.hasta >= inicio);
     const pct = (v, m) => (m > 0 ? Math.min(100, Math.round((100 * v) / m)) : 100);
     const avance = Math.min(pct(enc, metaEnc), pct(ch, metaCh));
+    // Puntaje para el ranking: promedio del % de encuestas y del % de charlas, cada uno topado en 100 (pasarse de la meta no suma extra)
+    const partes = [[enc, metaEnc], [ch, metaCh]].filter(([, m]) => m > 0).map(([v, m]) => Math.min(100, (100 * v) / m));
+    const puntaje = f === 0 || !partes.length ? null : Math.round((10 * partes.reduce((a, b) => a + b, 0)) / partes.length) / 10;
     const cumple = (metaEnc == null || enc >= metaEnc) && (metaCh == null || ch >= metaCh);
     return {
-      estado: f === 0 ? "ausente" : cumple ? "cumple" : avance >= 60 ? "camino" : "atencion", avance,
+      estado: f === 0 ? "ausente" : cumple ? "cumple" : avance >= 60 ? "camino" : "atencion", avance, puntaje,
       tecnico_id: t.id, nombre: t.nombre, sedes: mis.map((id) => nombreSede.get(id)).filter(Boolean).sort(),
       dias_activos: Math.round(f * D), dias_mes: D, ausente: f === 0, ausencias: ausenciasMes,
       encuestas: { valor: enc, meta: metaEnc, cumple: metaEnc == null ? null : enc >= metaEnc, nps: encNps, medica: encMed },
@@ -616,6 +619,14 @@ function consultar(q, { mensual, actas, evidencias, sedes, tipos }, siauDe, hoy)
   return { medida: { clave: q.medida, etiqueta: med.etq }, por, meses, filas: lista, total: med.promedio ? (valores.length ? Math.round((10 * valores.reduce((a, b) => a + b, 0)) / valores.length) / 10 : null) : valores.reduce((a, b) => a + b, 0) };
 }
 
+/** Ranking de cumplimiento: por puntaje (promedio de % de encuestas y charlas), luego actas entregadas y luego volumen. Solo quien ya suma avance. */
+function ranking(filas) {
+  const pctActas = (t) => (t.actas.esperadas ? t.actas.entregadas / t.actas.esperadas : 0);
+  return filas.filter((t) => !t.ausente && t.puntaje > 0)
+    .sort((a, b) => b.puntaje - a.puntaje || pctActas(b) - pctActas(a) || (b.encuestas.valor + b.charlas.valor) - (a.encuestas.valor + a.charlas.valor) || a.nombre.localeCompare(b.nombre, "es"))
+    .map((t, i) => ({ puesto: i + 1, id: t.tecnico_id, nombre: t.nombre, puntaje: t.puntaje, estado: t.estado, encuestas: t.encuestas.valor, meta_encuestas: t.encuestas.meta, charlas: t.charlas.valor, meta_charlas: t.charlas.meta, actas: t.actas.esperadas ? `${t.actas.entregadas}/${t.actas.esperadas}` : null }));
+}
+
 /** Datos del panel de inicio: indicadores, series de 12 meses, distribución de calificaciones, ranking de sedes y estado de cada SIAU. */
 function panel(mes, c, { mensual, evidencias, sedes, tipos }) {
   const filas = c.siau.tecnicos, evaluados = filas.filter((t) => !t.ausente);
@@ -643,12 +654,13 @@ function panel(mes, c, { mensual, evidencias, sedes, tipos }) {
     serie: meses.map((m) => ({ mes: m, nps: suma(m, ["encuestas"]), medica: suma(m, ["medica_evaluaciones"]), charlas: suma(m, CHA), lsc: suma(m, ["lsc_atenciones"]) })),
     distribucion: { nps, medica: med },
     sedes: sedes.map((s) => ({ sede: s.nombre, encuestas: suma(mes, ENC, s.id), charlas: suma(mes, CHA, s.id) })).filter((s) => s.encuestas || s.charlas).sort((a, b) => b.charlas + b.encuestas - a.charlas - a.encuestas),
-    siau: filas.map((t) => ({ id: t.tecnico_id, nombre: t.nombre, estado: t.estado, avance: t.avance, encuestas: t.encuestas.valor, meta_encuestas: t.encuestas.meta, charlas: t.charlas.valor, meta_charlas: t.charlas.meta, actas: t.actas.esperadas ? Math.round((100 * t.actas.entregadas) / t.actas.esperadas) : null })),
+    top: ranking(filas).slice(0, 5),
+    siau: filas.map((t) => ({ id: t.tecnico_id, nombre: t.nombre, estado: t.estado, avance: t.avance, puntaje: t.puntaje, encuestas: t.encuestas.valor, meta_encuestas: t.encuestas.meta, charlas: t.charlas.valor, meta_charlas: t.charlas.meta, actas: t.actas.esperadas ? Math.round((100 * t.actas.entregadas) / t.actas.esperadas) : null })),
     evidencias_tipo: tipos.map((t) => ({ tipo: t.nombre, area: t.area, n: evMes.filter((e) => e.tipo === t.clave).length })).filter((x) => x.n),
   };
 }
 
-return { MEDIDAS, DIMENSIONES, mesesEntre, consultar, panel };
+return { MEDIDAS, DIMENSIONES, mesesEntre, consultar, ranking, panel };
 })();
 
 const M_api = (() => {

@@ -34,9 +34,11 @@ export function construirReporte(d, siauId = "", ahora = new Date()) {
     ["Charlas (asistentes)", `${sum((t) => t.charlas.valor)} de ${sum((t) => t.charlas.meta ?? 0)}`],
     ["Actas de buzón", `${sum((t) => t.actas.entregadas)} de ${sum((t) => t.actas.esperadas)} entregadas`], ["Días restantes del mes", dia ? String(restantes) : "mes cerrado"]];
   const sinCob = siauId ? [] : d.siau.sin_cobertura;
+  const top = siauId ? [] : ev.filter((t) => t.puntaje > 0).sort((a, b) => b.puntaje - a.puntaje || b.actas.entregadas - a.actas.entregadas || (b.encuestas.valor + b.charlas.valor) - (a.encuestas.valor + a.charlas.valor)).slice(0, 5);
 
   const texto = [titulo.toUpperCase(), `Generado el ${ahora.toLocaleDateString("es-CO")}`, "", ...resumen.map(([k, v]) => `${k}: ${v}`), "",
     ...grupos.flatMap(([k, l]) => [`${ETQ[k].toUpperCase()} (${l.length})`, ...l.map((t) => `• ${nombre(t.nombre)} — ${t.sedes.join(", ") || "sin sedes"} — Encuestas ${t.encuestas.valor}/${t.encuestas.meta ?? "—"} · Charlas ${t.charlas.valor}/${t.charlas.meta ?? "—"}. ${accion(t, restantes)}`), ""]),
+    ...(top.length ? ["TOP 5 DEL MES (promedio del % de encuestas y charlas)", ...top.map((t, i) => `${i + 1}. ${nombre(t.nombre)} — ${t.puntaje} %`), ""] : []),
     ...(sinCob.length ? ["SEDES SIN SIAU ESTE MES", sinCob.map((x) => x.sede).join(", "), ""] : [])].join("\n");
 
   const bloque = ([k, l]) => `<section><h2 style="color:${COL[k]}">${esc(ETQ[k])} <small>(${l.length})</small></h2>${l.map((t) => `<article style="border-left:6px solid ${COL[k]}">
@@ -54,6 +56,7 @@ export function construirReporte(d, siauId = "", ahora = new Date()) {
     .acc{margin:6px 0 0}.pie{margin-top:24px;color:#566f7b;font-size:12px;border-top:1px solid #d5e0e3;padding-top:8px}@media print{body{margin:0}}</style></head><body>
     <h1>${esc(titulo)}</h1><p class="sub">SIAU · Subproceso de Gestión de la Calidad · MiRed IPS — generado el ${esc(ahora.toLocaleDateString("es-CO"))}</p>
     <div class="res">${resumen.map(([k, v]) => `<div><b>${esc(k)}</b>${esc(v)}</div>`).join("")}</div>
+    ${top.length ? `<section><h2>Top 5 del mes <small>(promedio del % de encuestas y de charlas)</small></h2><ol>${top.map((t) => `<li><b>${esc(nombre(t.nombre))}</b> — ${t.puntaje} % <small>(encuestas ${t.encuestas.valor}/${t.encuestas.meta ?? "—"} · charlas ${t.charlas.valor}/${t.charlas.meta ?? "—"})</small></li>`).join("")}</ol></section>` : ""}
     ${grupos.map(bloque).join("")}
     ${sinCob.length ? `<section><h2>Sedes sin SIAU este mes <small>(${sinCob.length})</small></h2><p>${esc(sinCob.map((x) => x.sede).join(", "))}</p></section>` : ""}
     <p class="pie">Metas mínimas por SIAU: la meta baja en proporción a los días de vacaciones o licencia. Las encuestas suman NPS y evaluación médica; las charlas cuentan asistentes. Lo registrado en cada sede se reparte entre quienes la atienden.</p></body></html>`;
