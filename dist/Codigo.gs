@@ -480,6 +480,41 @@ function informeMarkdown(e, hallazgos, ahora = new Date()) {
 return { REQUERIDAS, HORAS_MAX, analizar, informeMarkdown };
 })();
 
+const M_rotacion = (() => {
+// Rotación base de los SIAU: quién atiende qué sedes (definida por la líder de Calidad). El horario mensual aporta vacaciones y licencias;
+// las sedes de estas personas salen de aquí y se ajustan en Administrador → Personal y rotación.
+// [nombre, sedes (nombre del catálogo)]. La última persona atiende «las restantes» (null).
+const ROTACION = [
+  ["LILIANA SUAREZ", ["C. ADELITA DE CHAR", "P. LA 21"]],
+  ["HORACIO AMARIS", ["C. MURILLO", "P. LAS PALMAS"]],
+  ["JEIMIS LARA", ["C. NUEVO BARRANQUILLA", "P. REBOLO"]],
+  ["ANYI MORALES", ["C. CIUDADELA", "P. LA VILLA"]], // cubre la licencia de maternidad de Sindi Buelvas
+  ["NIRA LARA", ["C. LA MANGA", "P. VILLA SAN PABLO"]],
+  ["GREYS CARDENAS", ["C. LA PLAYA", "P. LAS FLORES"]],
+  ["SHIRLY MESA", ["C. SIMON BOLIVAR", "P. NUEVA VIDA"]],
+  ["ANDREA DE LEON", ["C. LUZ CHINITA", "P. LAS NIEVES"]],
+  ["KARLA CATAÑO", ["C. SUROCCIDENTE", "P. SAN JOSE"]],
+  ["LUIS ROMERO", ["C. SALUD METROPOLITANA", "P. CARLOS MEISEL"]],
+  ["LINDA DE LA CRUZ", ["C. BOSQUES DE MARIA", "P. SAN SALVADOR"]],
+  ["YUIRIS MEDINA", ["C. NAZARETH", "P. GALAN"]],
+  ["JULENIS ROJANO", ["P. JULIO MONTES", "P. LAS MALVINAS", "P. SIERRITA", "P. UNIVERSAL", "P. SANTO DOMINGO"]],
+  ["MARCOS FONTALVO", ["P. ESMERALDA LIPAYA", "P. JUAN MINA", "P. BUENA ESPERANZA", "P. NUEVA ERA", "P. LA PRADERA"]],
+  ["MICHEL VARGAS", null], // «en las restantes»
+];
+
+/** Compara nombres sin tildes ni mayúsculas; «y» e «i» se tratan igual (Jeimis/Jeimys) y basta que estén todas las palabras del nombre de la rotación. */
+const palabras = (s) => String(s ?? "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/y/g, "i").split(/[^a-z0-9]+/).filter(Boolean);
+const mismaPersona = (nombreRotacion, nombreHorario) => { const h = new Set(palabras(nombreHorario)), r = palabras(nombreRotacion); return r.length >= 2 && r.every((w) => h.has(w)); };
+
+/** Sedes de cada persona de la rotación; a la última («las restantes») le tocan las que nadie más tiene. */
+function sedesPorPersona(catalogo) {
+  const nombres = catalogo.map((c) => c[0]), usadas = new Set(ROTACION.flatMap((r) => r[1] ?? []));
+  return ROTACION.map(([nombre, sedes]) => [nombre, sedes ?? nombres.filter((n) => !usadas.has(n))]);
+}
+
+return { ROTACION, mismaPersona, sedesPorPersona };
+})();
+
 const M_api = (() => {
 // Núcleo de la plataforma: todas las reglas y rutas, sin depender de dónde corre (Apps Script o Node).
 // Recibe un «almacén» (tablas), un servicio de fotos y relojes; ver almacen.mjs (memoria) y google/Capa.gs (Hojas de Google).
@@ -487,8 +522,9 @@ const { CATALOGO, aliasDe, crearResolver, normalizar } = M_sedes;
 const { parsearBuzon, parsearCharlasMatriz, parsearEncuestas, parsearHorario, parsearIlsc } = M_consolidados;
 const { calcularCumplimiento, calcularPorTecnico, fechaValida, mesValido } = M_lib;
 const { analizar } = M_analisis;
+const { mismaPersona, sedesPorPersona } = M_rotacion;
 
-const VERSION_DATOS = 1;
+const VERSION_DATOS = 2;
 class ErrorHttp extends Error { constructor(estado, mensaje) { super(mensaje); this.estado = estado; } }
 const bad = (m) => new ErrorHttp(400, m);
 
@@ -527,7 +563,7 @@ const lista = (v) => { try { return v ? JSON.parse(v) : []; } catch { return [];
 const porId = (filas) => new Map(filas.map((f) => [f.id, f]));
 
 /** Crea las tablas base (40 sedes con alias, tipos de evidencia). Idempotente; fusiona alias agregados a mano. */
-function inicializar(almacen) {
+function inicializar(almacen, { rotacion = true } = {}) {
   return almacen.atomico(() => {
     const ajustes = almacen.tabla("ajustes");
     if (ajustes.todos().find((a) => a.id === "version_datos")?.valor === String(VERSION_DATOS)) return false;
@@ -539,9 +575,23 @@ function inicializar(almacen) {
     }
     const tipos = almacen.tabla("tipos"), existentes = new Set(tipos.todos().map((t) => t.id));
     for (const [clave, area, nombre, meta, alcance] of TIPOS_INICIALES) if (!existentes.has(clave)) tipos.insertar({ id: clave, clave, area, nombre, meta, alcance });
-    ajustes.insertar({ id: "version_datos", valor: String(VERSION_DATOS) });
+    if (rotacion) sembrarRotacion(almacen);
+    const v = ajustes.todos().find((a) => a.id === "version_datos");
+    if (v) ajustes.actualizar("version_datos", { valor: String(VERSION_DATOS) }); else ajustes.insertar({ id: "version_datos", valor: String(VERSION_DATOS) });
     return true;
   });
+}
+
+/** Crea (o reutiliza, aunque el horario escriba el nombre completo) a cada SIAU de la rotación base y le asigna sus sedes. Repetible. */
+function sembrarRotacion(almacen) {
+  const tecnicos = almacen.tabla("tecnicos"), asign = almacen.tabla("asignaciones"), sedes = almacen.tabla("sedes").todos();
+  for (const [nombre, nombresSedes] of sedesPorPersona(CATALOGO)) {
+    let t = tecnicos.todos().find((x) => mismaPersona(nombre, x.nombre));
+    const id = t ? t.id : tecnicos.insertar({ nombre, sede_id: null, activo: 1, rol: "tecnico", clave: normalizar(nombre) });
+    if (t) tecnicos.actualizar(id, { rol: "tecnico", activo: 1 });
+    asign.reemplazar((a) => a.tecnico_id === id && a.origen === "base", []);
+    for (const n of nombresSedes) { const s = sedes.find((x) => x.nombre === n); if (s) asign.insertar({ tecnico_id: id, sede_id: s.id, desde: "2026-01-01", hasta: null, origen: "base" }); }
+  }
 }
 
 function crearNucleo({ almacen, fotos, hoy = () => new Date().toLocaleDateString("sv"), ahora = () => new Date().toISOString().replace("T", " ").slice(0, 19) }) {
@@ -699,9 +749,10 @@ function crearNucleo({ almacen, fotos, hoy = () => new Date().toLocaleDateString
     let nAsig = 0, nAus = 0;
     for (const p of r.personal) {
       const clave = normalizar(p.nombre);
-      let id = existentes.find((t) => t.clave === clave)?.id;
-      if (id) tecnicos.actualizar(id, { rol: p.rol }); else { id = tecnicos.insertar({ nombre: p.nombre.replace(/\s+/g, " ").trim(), sede_id: null, activo: 1, rol: p.rol, clave }); existentes.push({ id, clave }); }
-      for (const t of p.sedes_texto) { const sid = sedeId(t); if (sid) { T("asignaciones").insertar({ tecnico_id: id, sede_id: sid, desde, hasta, origen: "horario" }); nAsig++; } }
+      let id = existentes.find((t) => t.clave === clave)?.id ?? existentes.find((t) => mismaPersona(t.nombre, p.nombre))?.id;
+      if (id) tecnicos.actualizar(id, { rol: p.rol }); else { id = tecnicos.insertar({ nombre: p.nombre.replace(/\s+/g, " ").trim(), sede_id: null, activo: 1, rol: p.rol, clave }); existentes.push({ id, clave, nombre: p.nombre }); }
+      const conBase = T("asignaciones").todos().some((a) => a.tecnico_id === id && a.origen === "base");
+      for (const t of conBase ? [] : p.sedes_texto) { const sid = sedeId(t); if (sid) { T("asignaciones").insertar({ tecnico_id: id, sede_id: sid, desde, hasta, origen: "horario" }); nAsig++; } }
       for (const a of p.ausencias) { T("ausencias").insertar({ tecnico_id: id, tipo: a.tipo, desde: a.desde, hasta: a.hasta, nota: a.nota, origen: "horario" }); nAus++; }
     }
     return { mes: r.mes, personal: r.personal.length, asignaciones: nAsig, ausencias: nAus, avisos: r.avisos };
@@ -826,8 +877,8 @@ return { VERSION_DATOS, ErrorHttp, inicializar, crearNucleo };
 
 const { ErrorHttp, crearNucleo, inicializar } = M_api;
 
-const PLANTILLA_VISOR = "<!doctype html>\n<html lang=\"es\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1,viewport-fit=cover\">\n<title>Evidencias SIAU</title><base target=\"_top\"><link rel=\"icon\" href=\"{{R}}/shared/marca/medalla.png\"><link rel=\"stylesheet\" href=\"{{R}}/shared/estilos.css\"></head>\n<body class=\"tiene-tabbar\">\n<script>window.PLATAFORMA = { base: \"{{R}}\", app: \"{{APP}}\" };</script>\n<div class=\"fondo\" aria-hidden=\"true\"></div>\n<header class=\"nav glass\" id=\"nav\"><div class=\"logos\" id=\"logos\"></div><span class=\"nav-titulo\"></span><a id=\"irAdmin\" href=\"{{APP}}?pagina=admin\" target=\"_top\" hidden>Administrar</a></header>\n<main id=\"app\"></main>\n<footer class=\"pie-inst\">\n  <div class=\"pie-in\">\n    <p class=\"pie-txt\"><img src=\"{{R}}/shared/marca/medalla.png\" alt=\"\">SIAU · Subproceso de Gestión de la Calidad · MiRed IPS</p>\n    <div class=\"vigilancia\"><span class=\"chip\"><img src=\"{{R}}/shared/marca/supersalud.png\" alt=\"Vigilado Supersalud\"></span><span class=\"chip\"><img src=\"{{R}}/shared/marca/alcaldia.png\" alt=\"Alcaldía de Barranquilla\"></span></div>\n  </div>\n</footer>\n<nav class=\"tabbar glass\" id=\"tabbar\" aria-label=\"Módulos\" hidden></nav>\n<dialog id=\"dlg\"><div class=\"in\" id=\"dlgc\"></div></dialog>\n<script type=\"module\" src=\"{{R}}/visor/app.js\"></script>\n</body></html>\n";
-const PLANTILLA_ADMIN = "<!doctype html>\n<html lang=\"es\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1,viewport-fit=cover\">\n<title>Administrador de evidencias</title><base target=\"_top\"><link rel=\"icon\" href=\"{{R}}/shared/marca/medalla.png\"><link rel=\"stylesheet\" href=\"{{R}}/shared/estilos.css\"></head>\n<body>\n<script>window.PLATAFORMA = { base: \"{{R}}\", app: \"{{APP}}\" };</script>\n<div class=\"fondo\" aria-hidden=\"true\"></div>\n<header class=\"nav glass\" id=\"nav\"><div class=\"logos\" id=\"logos\"></div><span class=\"nav-titulo\"></span><a href=\"{{APP}}\" target=\"_top\">Ver visor</a></header>\n<main id=\"app\"></main>\n<footer class=\"pie-inst\">\n  <div class=\"pie-in\">\n    <p class=\"pie-txt\"><img src=\"{{R}}/shared/marca/medalla.png\" alt=\"\">SIAU · Subproceso de Gestión de la Calidad · MiRed IPS</p>\n    <div class=\"vigilancia\"><span class=\"chip\"><img src=\"{{R}}/shared/marca/supersalud.png\" alt=\"Vigilado Supersalud\"></span><span class=\"chip\"><img src=\"{{R}}/shared/marca/alcaldia.png\" alt=\"Alcaldía de Barranquilla\"></span></div>\n  </div>\n</footer>\n<script type=\"module\" src=\"{{R}}/admin/app.js\"></script>\n</body></html>\n";
+const PLANTILLA_VISOR = "<!doctype html>\n<html lang=\"es\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1,viewport-fit=cover\">\n<title>Evidencias SIAU</title><base target=\"_top\"><link rel=\"icon\" href=\"{{R}}/shared/marca/medalla.png\"><link rel=\"stylesheet\" href=\"{{R}}/shared/estilos.css\"></head>\n<body class=\"tiene-tabbar\">\n<script>window.PLATAFORMA = { base: \"{{R}}\", app: \"{{APP}}\" };</script>\n<div class=\"fondo\" aria-hidden=\"true\"></div>\n<header class=\"nav glass\" id=\"nav\"><div class=\"logos\" id=\"logos\"></div><span class=\"nav-titulo\"></span><a id=\"irAdmin\" href=\"{{APP}}?pagina=admin\" target=\"_top\" hidden>Administrar</a></header>\n<main id=\"app\"></main>\n<footer class=\"pie-inst\">\n  <div class=\"pie-in\">\n    <p class=\"pie-txt\"><img src=\"{{R}}/shared/marca/medalla.png\" alt=\"\">SIAU · Subproceso de Gestión de la Calidad · MiRed IPS</p>\n  </div>\n</footer>\n<nav class=\"tabbar glass\" id=\"tabbar\" aria-label=\"Módulos\" hidden></nav>\n<dialog id=\"dlg\"><div class=\"in\" id=\"dlgc\"></div></dialog>\n<script type=\"module\" src=\"{{R}}/visor/app.js\"></script>\n</body></html>\n";
+const PLANTILLA_ADMIN = "<!doctype html>\n<html lang=\"es\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1,viewport-fit=cover\">\n<title>Administrador de evidencias</title><base target=\"_top\"><link rel=\"icon\" href=\"{{R}}/shared/marca/medalla.png\"><link rel=\"stylesheet\" href=\"{{R}}/shared/estilos.css\"></head>\n<body>\n<script>window.PLATAFORMA = { base: \"{{R}}\", app: \"{{APP}}\" };</script>\n<div class=\"fondo\" aria-hidden=\"true\"></div>\n<header class=\"nav glass\" id=\"nav\"><div class=\"logos\" id=\"logos\"></div><span class=\"nav-titulo\"></span><a href=\"{{APP}}\" target=\"_top\">Ver visor</a></header>\n<main id=\"app\"></main>\n<footer class=\"pie-inst\">\n  <div class=\"pie-in\">\n    <p class=\"pie-txt\"><img src=\"{{R}}/shared/marca/medalla.png\" alt=\"\">SIAU · Subproceso de Gestión de la Calidad · MiRed IPS</p>\n  </div>\n</footer>\n<script type=\"module\" src=\"{{R}}/admin/app.js\"></script>\n</body></html>\n";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Capa de Google: conecta el núcleo (reglas) con Hojas de cálculo, Drive y la web app.

@@ -4,8 +4,9 @@ import { CATALOGO, aliasDe, crearResolver, normalizar } from "./sedes.mjs";
 import { parsearBuzon, parsearCharlasMatriz, parsearEncuestas, parsearHorario, parsearIlsc } from "./consolidados.mjs";
 import { calcularCumplimiento, calcularPorTecnico, fechaValida, mesValido } from "./lib.mjs";
 import { analizar } from "./analisis.mjs";
+import { mismaPersona, sedesPorPersona } from "./rotacion.mjs";
 
-export const VERSION_DATOS = 1;
+export const VERSION_DATOS = 2;
 export class ErrorHttp extends Error { constructor(estado, mensaje) { super(mensaje); this.estado = estado; } }
 const bad = (m) => new ErrorHttp(400, m);
 
@@ -44,7 +45,7 @@ const lista = (v) => { try { return v ? JSON.parse(v) : []; } catch { return [];
 const porId = (filas) => new Map(filas.map((f) => [f.id, f]));
 
 /** Crea las tablas base (40 sedes con alias, tipos de evidencia). Idempotente; fusiona alias agregados a mano. */
-export function inicializar(almacen) {
+export function inicializar(almacen, { rotacion = true } = {}) {
   return almacen.atomico(() => {
     const ajustes = almacen.tabla("ajustes");
     if (ajustes.todos().find((a) => a.id === "version_datos")?.valor === String(VERSION_DATOS)) return false;
@@ -56,9 +57,23 @@ export function inicializar(almacen) {
     }
     const tipos = almacen.tabla("tipos"), existentes = new Set(tipos.todos().map((t) => t.id));
     for (const [clave, area, nombre, meta, alcance] of TIPOS_INICIALES) if (!existentes.has(clave)) tipos.insertar({ id: clave, clave, area, nombre, meta, alcance });
-    ajustes.insertar({ id: "version_datos", valor: String(VERSION_DATOS) });
+    if (rotacion) sembrarRotacion(almacen);
+    const v = ajustes.todos().find((a) => a.id === "version_datos");
+    if (v) ajustes.actualizar("version_datos", { valor: String(VERSION_DATOS) }); else ajustes.insertar({ id: "version_datos", valor: String(VERSION_DATOS) });
     return true;
   });
+}
+
+/** Crea (o reutiliza, aunque el horario escriba el nombre completo) a cada SIAU de la rotación base y le asigna sus sedes. Repetible. */
+function sembrarRotacion(almacen) {
+  const tecnicos = almacen.tabla("tecnicos"), asign = almacen.tabla("asignaciones"), sedes = almacen.tabla("sedes").todos();
+  for (const [nombre, nombresSedes] of sedesPorPersona(CATALOGO)) {
+    let t = tecnicos.todos().find((x) => mismaPersona(nombre, x.nombre));
+    const id = t ? t.id : tecnicos.insertar({ nombre, sede_id: null, activo: 1, rol: "tecnico", clave: normalizar(nombre) });
+    if (t) tecnicos.actualizar(id, { rol: "tecnico", activo: 1 });
+    asign.reemplazar((a) => a.tecnico_id === id && a.origen === "base", []);
+    for (const n of nombresSedes) { const s = sedes.find((x) => x.nombre === n); if (s) asign.insertar({ tecnico_id: id, sede_id: s.id, desde: "2026-01-01", hasta: null, origen: "base" }); }
+  }
 }
 
 export function crearNucleo({ almacen, fotos, hoy = () => new Date().toLocaleDateString("sv"), ahora = () => new Date().toISOString().replace("T", " ").slice(0, 19) }) {
@@ -216,9 +231,10 @@ export function crearNucleo({ almacen, fotos, hoy = () => new Date().toLocaleDat
     let nAsig = 0, nAus = 0;
     for (const p of r.personal) {
       const clave = normalizar(p.nombre);
-      let id = existentes.find((t) => t.clave === clave)?.id;
-      if (id) tecnicos.actualizar(id, { rol: p.rol }); else { id = tecnicos.insertar({ nombre: p.nombre.replace(/\s+/g, " ").trim(), sede_id: null, activo: 1, rol: p.rol, clave }); existentes.push({ id, clave }); }
-      for (const t of p.sedes_texto) { const sid = sedeId(t); if (sid) { T("asignaciones").insertar({ tecnico_id: id, sede_id: sid, desde, hasta, origen: "horario" }); nAsig++; } }
+      let id = existentes.find((t) => t.clave === clave)?.id ?? existentes.find((t) => mismaPersona(t.nombre, p.nombre))?.id;
+      if (id) tecnicos.actualizar(id, { rol: p.rol }); else { id = tecnicos.insertar({ nombre: p.nombre.replace(/\s+/g, " ").trim(), sede_id: null, activo: 1, rol: p.rol, clave }); existentes.push({ id, clave, nombre: p.nombre }); }
+      const conBase = T("asignaciones").todos().some((a) => a.tecnico_id === id && a.origen === "base");
+      for (const t of conBase ? [] : p.sedes_texto) { const sid = sedeId(t); if (sid) { T("asignaciones").insertar({ tecnico_id: id, sede_id: sid, desde, hasta, origen: "horario" }); nAsig++; } }
       for (const a of p.ausencias) { T("ausencias").insertar({ tecnico_id: id, tipo: a.tipo, desde: a.desde, hasta: a.hasta, nota: a.nota, origen: "horario" }); nAus++; }
     }
     return { mes: r.mes, personal: r.personal.length, asignaciones: nAsig, ausencias: nAus, avisos: r.avisos };

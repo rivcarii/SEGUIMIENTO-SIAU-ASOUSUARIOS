@@ -2,9 +2,9 @@
 import { crearAlmacenMemoria, crearFotosMemoria } from "../nucleo/almacen.mjs";
 import { crearNucleo, inicializar, ErrorHttp } from "../nucleo/api.mjs";
 
-export function nuevoNucleo({ hoy = "2026-09-30", ahora = "2026-09-30 12:00:00" } = {}) {
+export function nuevoNucleo({ hoy = "2026-09-30", ahora = "2026-09-30 12:00:00", rotacion = false } = {}) {
   const almacen = crearAlmacenMemoria(), fotos = crearFotosMemoria();
-  inicializar(almacen);
+  inicializar(almacen, { rotacion });
   const nucleo = crearNucleo({ almacen, fotos, hoy: () => hoy, ahora: () => ahora });
   const usuarios = { admin: { email: "admin@x.org", rol: "admin" }, visor: { email: "visor@x.org", rol: "visor" }, nadie: { email: "otro@x.org", rol: null } };
   /** api("GET", "/api/config", { rol, q, cuerpo }) */

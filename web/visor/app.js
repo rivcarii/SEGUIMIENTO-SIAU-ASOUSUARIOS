@@ -1,7 +1,7 @@
 import { api, h, mesActual, fmtFecha, opciones, pintarMarca, mascota, tituloGrande, mesLegible, recurso } from "../shared/comun.js";
 
 const app = document.getElementById("app"), dlg = document.getElementById("dlg"), dlgc = document.getElementById("dlgc"), tabbar = document.getElementById("tabbar");
-const S = { cfg: null, area: "siau", vista: "cumplimiento", mes: mesActual(), filtros: {} };
+const S = { cfg: null, area: "siau", vista: "cumplimiento", mes: mesActual(), filtros: {}, siau: "" };
 const PAGINA = 24;
 const AREAS = ["siau", "asociacion"];
 const delay = (i) => `--d:${Math.min(i, 8) * 40}ms`;
@@ -64,16 +64,36 @@ async function vistaCumplimiento(c) {
   try { [d, est] = await Promise.all([api("/api/cumplimiento?mes=" + S.mes), api("/api/estado").catch(() => null)]); }
   catch (e) { return c.replaceChildren(h("div", { class: "msg err" }, e.message)); }
 
-  const filas = d.siau.tecnicos, evaluados = filas.filter((t) => !t.ausente);
+  const todas = d.siau.tecnicos;
+  if (S.siau && !todas.some((t) => String(t.tecnico_id) === S.siau)) S.siau = "";
+  const filas = S.siau ? todas.filter((t) => String(t.tecnico_id) === S.siau) : todas, evaluados = filas.filter((t) => !t.ausente);
   const cumplen = evaluados.filter((t) => t.encuestas.cumple !== false && t.charlas.cumple !== false).length;
   const frac = evaluados.length ? cumplen / evaluados.length : null;
   const pose = frac == null ? "siau" : frac >= 1 ? "pulgar" : frac < 0.6 ? "dardo" : "siau";
   const metaEnc = filas.find((t) => t.encuestas.meta)?.encuestas.meta, metaCh = filas.find((t) => t.charlas.meta)?.charlas.meta;
-  const titulo = frac == null ? "Aún no hay personal o consolidados cargados para este mes." : frac >= 1 ? `¡Los ${evaluados.length} SIAU cumplen sus metas de ${mesLegible(d.mes)}!` : `${cumplen} de ${evaluados.length} SIAU cumplen sus metas mínimas de ${mesLegible(d.mes)}.`;
+  const nombreCorto = (n) => n.split(/\s+/).filter(Boolean).map((x) => x[0] + x.slice(1).toLowerCase()).join(" ");
+  const quien = S.siau ? nombreCorto(filas[0].nombre) : null;
+  const titulo = S.siau ? (filas[0].ausente ? `${quien} no está activo/a este mes (${filas[0].ausencias[0]?.tipo ?? "ausente"}).` : frac >= 1 ? `¡${quien} cumple sus metas de ${mesLegible(d.mes)}!` : `${quien} aún no cumple todas sus metas de ${mesLegible(d.mes)}.`) : frac == null ? "Aún no hay personal o consolidados cargados para este mes." : frac >= 1 ? `¡Los ${evaluados.length} SIAU cumplen sus metas de ${mesLegible(d.mes)}!` : `${cumplen} de ${evaluados.length} SIAU cumplen sus metas mínimas de ${mesLegible(d.mes)}.`;
   const detalle = [`Meta mensual por SIAU: ${metaEnc ?? 90} encuestas · ${metaCh ?? 200} charlas`, d.siau.sin_cobertura.length && `${d.siau.sin_cobertura.length} sede(s) sin SIAU`].filter(Boolean).join(" · ");
   const hero = h("div", { class: "hero" }, mascota(pose), h("div", { class: "card glass globo" }, h("div", { class: "titulo" }, titulo), h("div", { class: "detalle" }, detalle)));
 
-  const nombreCorto = (n) => n.split(/\s+/).filter(Boolean).map((x) => x[0] + x.slice(1).toLowerCase()).join(" ");
+  const filtroSiau = h("select", { "aria-label": "SIAU", onchange: () => { S.siau = filtroSiau.value; render(); } }, h("option", { value: "" }, `Todos los SIAU (${todas.length})`),
+    ...todas.map((t) => h("option", { value: String(t.tecnico_id) }, nombreCorto(t.nombre))));
+  filtroSiau.value = S.siau;
+  // Resumen global (o de la persona elegida): suma lo logrado y las metas de quienes están activos
+  const sum = (k, c) => evaluados.reduce((t, x) => t + (x[k][c] ?? 0), 0);
+  const kpi = (etq, valor, meta, nota) => { const p = meta ? Math.min(100, Math.round((100 * valor) / meta)) : null; return h("div", { class: "card" }, h("div", { class: "mut" }, etq),
+    h("div", { class: "big", style: "margin-top:6px" }, String(valor), meta ? h("small", {}, ` / ${meta}`) : ""),
+    p == null ? "" : h("div", { class: "gauge " + clase(p), role: "img", "aria-label": `${p}% de la meta` }, h("i", { style: `transform:scaleX(${p / 100})` })), nota ? h("div", { class: "leyenda" }, nota) : ""); };
+  const actEsp = evaluados.reduce((t, x) => t + x.actas.esperadas, 0), actEnt = evaluados.reduce((t, x) => t + x.actas.entregadas, 0);
+  const resumen = evaluados.length ? h("div", { class: "grid" },
+    S.siau ? "" : kpi("SIAU que cumplen", cumplen, evaluados.length, `${filas.length - evaluados.length ? filas.length - evaluados.length + " ausente(s) sin evaluar" : "Todos activos"}`),
+    kpi("Encuestas", sum("encuestas", "valor"), sum("encuestas", "meta") || null, S.siau ? "" : "Suma de todos los SIAU activos"),
+    kpi("Charlas", sum("charlas", "valor"), sum("charlas", "meta") || null, S.siau ? "" : "Suma de todos los SIAU activos"),
+    kpi("Actas de buzón", actEnt, actEsp || null, "Entregadas hasta hoy")) : "";
+  const detalleSiau = S.siau && filas[0] ? h("div", { class: "card" }, h("div", { class: "mut" }, "Sedes que atiende este mes"),
+    h("div", { class: "chips", style: "margin-top:8px" }, filas[0].sedes.length ? filas[0].sedes.map((x) => h("span", { class: "chip-sede", style: "background:rgba(6,93,126,.12);color:var(--azul)" }, x)) : h("span", { class: "mut" }, "Sin sedes asignadas")),
+    filas[0].ausencias.length ? h("p", { class: "mut" }, "Ausencias: " + filas[0].ausencias.map((a) => `${a.tipo} (${fmtFecha(a.desde)} → ${fmtFecha(a.hasta)})`).join(" · ")) : "") : "";
   const tabla = filas.length ? h("div", { class: "card scroll" }, h("table", { class: "cient" },
     h("thead", {}, h("tr", {}, ["SIAU", "Días", "Encuestas", "Charlas", "NPS", "Actas"].map((t) => h("th", {}, t)))),
     h("tbody", {}, filas.map((t) => h("tr", { class: t.ausente ? "ausente" : "" },
@@ -88,7 +108,10 @@ async function vistaCumplimiento(c) {
     h("div", { class: "chips" }, d.siau.sin_cobertura.map((x) => h("span", { class: "chip-sede", title: x.motivo }, x.sede)))) : "";
 
   const ac = d.actas_consolidado;
-  const actas = ac ? h("div", { class: "card scroll" },
+  const mias = S.siau && filas[0] ? filas[0].actas : null;
+  const actas = mias ? h("div", { class: "card scroll" }, h("p", { class: "mut", style: "margin:0 0 8px" }, `${mias.entregadas} de ${mias.esperadas} actas entregadas hasta hoy en sus sedes.`),
+    mias.pendientes.length ? h("table", { class: "cient" }, h("thead", {}, h("tr", {}, h("th", {}, "Sede"), h("th", {}, "Acta pendiente"))),
+      h("tbody", {}, mias.pendientes.map((p) => h("tr", {}, h("td", {}, p.sede), h("td", { class: "num" }, `${p.codigo} (${fmtFecha(p.fecha)})`))))) : h("p", {}, "Está al día con sus actas.")) : ac ? h("div", { class: "card scroll" },
     h("p", { class: "mut", style: "margin:0 0 8px" }, `${ac.entregadas} de ${ac.esperadas} actas entregadas hasta hoy (${ac.codigos.join(", ") || "—"}). El calendario sale del propio consolidado.`),
     ac.sedes_pendientes.length ? h("table", { class: "cient" }, h("thead", {}, h("tr", {}, h("th", {}, "Sede"), h("th", {}, "Actas pendientes"))),
       h("tbody", {}, ac.sedes_pendientes.map((x) => h("tr", {}, h("td", {}, x.sede), h("td", { class: "num" }, x.pendientes.map((p) => `${p.codigo} (${fmtFecha(p.fecha)})`).join(", ")))))) : h("p", {}, "Todas las sedes están al día."))
@@ -105,11 +128,12 @@ async function vistaCumplimiento(c) {
   const hall = (est?.hallazgos ?? []).filter((x) => x.nivel !== "info");
   const bot = hall.length ? h("div", { class: "msg err" }, h("b", {}, "Atención con los datos: "), hall.slice(0, 4).map((x) => h("div", {}, "• " + x.texto))) : "";
 
-  c.replaceChildren(hero, h("div", { class: "filters" }, h("label", { style: "margin:0" }, "Periodo de observación"), mes), ...avisos,
-    sec(1, "Cumplimiento por SIAU"), tabla, h("p", { class: "leyenda" }, h("b", {}, "Tabla 1."), " Metas mínimas por SIAU. Lo registrado en cada sede se reparte entre quienes la atienden; la meta baja en proporción a los días de vacaciones o licencia."),
-    ...(sinCob ? [sec(2, "Sedes sin cobertura"), sinCob] : []),
-    sec(sinCob ? 3 : 2, "Actas de buzón"), actas, h("p", { class: "leyenda" }, h("b", {}, "Tabla 2."), " Actas de apertura de buzón vencidas y no entregadas."),
-    sec(sinCob ? 4 : 3, "Acompañamiento LSC (intérprete)"), lsc, bot);
+  c.replaceChildren(hero, h("div", { class: "filters" }, h("label", { style: "margin:0" }, "Periodo de observación"), mes, filtroSiau), ...avisos,
+    sec(1, S.siau ? "Cumplimiento de " + quien : "Cumplimiento global"), resumen, detalleSiau,
+    h("div", { style: "height:14px" }), sec(2, S.siau ? "Detalle" : "Cumplimiento por SIAU"), tabla, h("p", { class: "leyenda" }, h("b", {}, "Tabla 1."), " Metas mínimas por SIAU. Lo registrado en cada sede se reparte entre quienes la atienden; la meta baja en proporción a los días de vacaciones o licencia."),
+    ...(sinCob && !S.siau ? [sec(3, "Sedes sin cobertura"), sinCob] : []),
+    sec(sinCob && !S.siau ? 4 : 3, "Actas de buzón"), actas, h("p", { class: "leyenda" }, h("b", {}, "Tabla 2."), " Actas de apertura de buzón vencidas y no entregadas."),
+    sec(sinCob && !S.siau ? 5 : 4, "Acompañamiento LSC (intérprete)"), lsc, bot);
 }
 
 // ---------- Ludoteca (en construcción)

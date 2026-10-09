@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 
 const RAIZ = join(dirname(fileURLToPath(import.meta.url)), "..");
 const leer = (r) => readFileSync(join(RAIZ, r), "utf8");
-const MODULOS = ["sedes", "lib", "consolidados", "analisis", "api"]; // en orden de dependencia (almacen.mjs es solo para pruebas)
+const MODULOS = ["sedes", "lib", "consolidados", "analisis", "rotacion", "api"]; // en orden de dependencia (almacen.mjs es solo para pruebas)
 
 export function construir() {
   const partes = [`// ARCHIVO GENERADO por google/construir.mjs — no lo edite aquí: edite nucleo/ o google/Capa.gs y vuelva a construir.\n`];
