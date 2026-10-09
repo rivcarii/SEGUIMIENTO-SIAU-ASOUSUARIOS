@@ -1,5 +1,6 @@
 import { abrirLibro } from "../shared/xlsx.js";
 import { prepararLibro, ETIQUETAS } from "../shared/preparar.js";
+import { selectorMes, selectorFecha } from "../shared/selectores.js";
 import { formEvidencia } from "../shared/formevidencia.js";
 import { api, h, fechaHoy, fmtFecha, mesActual, opciones, pintarMarca, mascota, tituloGrande } from "../shared/comun.js";
 
@@ -144,7 +145,7 @@ const ROLES = [["tecnico", "SIAU (se evalúa)"], ["interprete", "Intérprete LSC
 const TIPOS_AUS = [["vacaciones", "Vacaciones"], ["licencia", "Licencia"], ["incapacidad", "Incapacidad"], ["otro", "Otro"]];
 
 async function personal(cont) {
-  const mes = h("input", { type: "month", value: mesPersonal, "aria-label": "Mes", onchange: () => { mesPersonal = mes.value || mesActual(); personal(cont); } });
+  const mes = selectorMes({ value: mesPersonal, "aria-label": "Mes", onchange: (v) => { mesPersonal = v || mesActual(); personal(cont); } });
   let d;
   try { d = await api("/api/admin/personal?mes=" + mesPersonal); } catch (e) { return cont.replaceChildren(h("div", { class: "msg err" }, e.message)); }
   const msg = h("div"), recargar = () => personal(cont);
@@ -160,9 +161,9 @@ async function personal(cont) {
 
   const tarjeta = (t) => {
     const rol = h("select", { onchange: llamar(() => api("/api/admin/tecnicos/" + t.id, { method: "PUT", json: { rol: rol.value } })) }, ROLES.map(([v, n]) => h("option", { value: v }, n))); rol.value = t.rol;
-    const sede = h("select"), desde = h("input", { type: "date", value: primero }), hasta = h("input", { type: "date", "aria-label": "Hasta (opcional)" });
+    const sede = h("select"), desde = selectorFecha({ value: primero, "aria-label": "Desde" }), hasta = selectorFecha({ "aria-label": "Hasta", opcional: true, vacio: "Sin fecha de fin" });
     opciones(sede, cfg.sedes.filter((x) => x.activa), "id", "nombre", "— sede —");
-    const tipo = h("select", {}, TIPOS_AUS.map(([v, n]) => h("option", { value: v }, n))), ad = h("input", { type: "date", value: primero }), ah = h("input", { type: "date", value: `${mesPersonal}-${String(new Date(+mesPersonal.slice(0, 4), +mesPersonal.slice(5), 0).getDate()).padStart(2, "0")}` }), nota = h("input", { type: "text", placeholder: "Nota (opcional)" });
+    const tipo = h("select", {}, TIPOS_AUS.map(([v, n]) => h("option", { value: v }, n))), ad = selectorFecha({ value: primero, "aria-label": "Desde" }), ah = selectorFecha({ value: `${mesPersonal}-${String(new Date(+mesPersonal.slice(0, 4), +mesPersonal.slice(5), 0).getDate()).padStart(2, "0")}`, "aria-label": "Hasta" }), nota = h("input", { type: "text", placeholder: "Nota (opcional)" });
     return h("div", { class: "card", style: "margin-top:14px" + (t.activo ? "" : ";opacity:.6") },
       h("div", { class: "filters" }, h("h3", { style: "margin:0;flex:1" }, t.nombre), rol,
         h("button", { class: "btn sec", onclick: llamar(() => api("/api/admin/tecnicos/" + t.id, { method: "PUT", json: { activo: !t.activo } })) }, t.activo ? "Desactivar" : "Activar")),

@@ -1,5 +1,6 @@
 // Motor de consulta: una medida + una agrupación + filtros. También entiende frases como «encuestas por sede en septiembre».
 import { api, h, mesActual, opciones, sk } from "../shared/comun.js";
+import { selectorMes } from "../shared/selectores.js";
 import { COLOR, barrasMes, area, barrasH, mesCorto } from "../shared/graficos.js";
 
 const sin = (t) => String(t ?? "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
@@ -50,7 +51,7 @@ export async function vistaConsultas(c, S) {
   const hoy = mesActual(), q = S.consulta ??= { medida: "encuestas_total", por: "mes", desde: restar(hoy, 5), hasta: hoy, sede: "", siau: "" };
   const cfg = S.cfg;
   const texto = h("input", { type: "search", placeholder: "Escriba lo que necesita: «encuestas por sede en septiembre»", "aria-label": "Consulta en lenguaje natural", value: S.consultaTexto ?? "" });
-  const medida = h("select", { "aria-label": "Medida" }), por = h("select", { "aria-label": "Agrupar por" }), desde = h("input", { type: "month", "aria-label": "Desde", value: q.desde }), hasta = h("input", { type: "month", "aria-label": "Hasta", value: q.hasta });
+  const medida = h("select", { "aria-label": "Medida" }), por = h("select", { "aria-label": "Agrupar por" }), desde = selectorMes({ "aria-label": "Desde", value: q.desde }), hasta = selectorMes({ "aria-label": "Hasta", value: q.hasta });
   const sede = h("select", { "aria-label": "Sede" }), siau = h("select", { "aria-label": "SIAU" }), salida = h("div", { "aria-live": "polite" });
   opciones(sede, cfg.sedes, "id", "nombre", "Todas las sedes"); opciones(siau, cfg.tecnicos.filter((t) => t.rol === "tecnico"), "id", "nombre", "Todos los SIAU");
   por.replaceChildren(...[["mes", "Mes"], ["sede", "Sede"], ["siau", "SIAU"], ["tipo", "Tipo de evidencia"]].map(([v, n]) => h("option", { value: v }, "Agrupar por: " + n)));

@@ -1,5 +1,6 @@
 // Formulario para adjuntar o editar una evidencia (fotografías y documentos PDF). Lo usan el administrador y la Fototeca del visor.
 import { api, h, fechaHoy, opciones } from "./comun.js";
+import { selectorFecha } from "./selectores.js";
 
 const MAX_PDF = 10 * 1024 * 1024;
 
@@ -33,7 +34,7 @@ const aviso = (el, ok, texto) => el.replaceChildren(h("div", { class: "msg " + (
 
 /** cfg: respuesta de /api/config. ev: evidencia a editar (o null). alGuardar(): se llama tras guardar (si no se pasa, el formulario se limpia). */
 export function formEvidencia({ cfg, ev = null, alGuardar = null, alCancelar = null, area = null }) {
-  const f = { tipo: h("select", { required: true }), fecha: h("input", { type: "date", required: true, value: ev?.fecha ?? fechaHoy() }),
+  const f = { tipo: h("select", { required: true }), fecha: selectorFecha({ value: ev?.fecha ?? fechaHoy(), "aria-label": "Fecha" }),
     sede: h("select"), tecnico: h("select"), titulo: h("input", { type: "text", required: true, maxLength: 200, value: ev?.titulo ?? "" }),
     desc: h("textarea", { maxLength: 5000, placeholder: "Breve descripción: tema, quién lo envió, qué muestra" }, ev?.descripcion ?? ""), cant: h("input", { type: "number", min: 1, value: ev?.cantidad ?? 1 }),
     asist: h("input", { type: "number", min: 0, value: ev?.asistentes ?? "" }),

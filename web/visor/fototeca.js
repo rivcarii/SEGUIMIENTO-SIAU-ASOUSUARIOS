@@ -1,5 +1,6 @@
 // Fototeca: dos álbumes (fotografías y documentos PDF) con vista previa. Quien administra puede adjuntar, editar y eliminar desde aquí.
 import { api, h, fmtFecha, opciones, mascota, sk, skGaleria } from "../shared/comun.js";
+import { selectorMes } from "../shared/selectores.js";
 import { formEvidencia } from "../shared/formevidencia.js";
 
 const PAGINA = 24;
@@ -18,7 +19,7 @@ export function vistaFototeca(c, S, { dlg, dlgc }) {
   const album = (S.album ??= "fotos");
   const tipos = S.cfg.tipos.filter((t) => t.area === S.area);
   const sel = (k, lista, etiqueta, valor, texto) => { const s = h("select", { "aria-label": etiqueta, onchange: () => { f[k] = s.value; cargar(true); } }); opciones(s, lista, valor, texto, etiqueta); s.value = f[k] ?? ""; return s; };
-  const mes = h("input", { type: "month", value: f.mes ?? "", "aria-label": "Mes", onchange: () => { f.mes = mes.value; cargar(true); } });
+  const mes = selectorMes({ value: f.mes ?? "", "aria-label": "Mes", opcional: true, vacio: "Todos los meses", onchange: (v) => { f.mes = v; cargar(true); } });
   const buscar = h("input", { type: "search", placeholder: "Buscar por título o descripción", "aria-label": "Buscar", value: f.buscar ?? "", onchange: () => { f.buscar = buscar.value; cargar(true); } });
   const lista = h("div", { class: album === "fotos" ? "grid galeria" : "grid docs" }), pie = h("div", { style: "text-align:center;margin:18px" });
   const albumes = h("div", { class: "albumes", role: "tablist", "aria-label": "Álbumes" },

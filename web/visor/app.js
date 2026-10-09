@@ -1,4 +1,5 @@
 import { api, h, mesActual, fmtFecha, opciones, pintarMarca, mascota, tituloGrande, mesLegible, recurso, sk, skTarjetas } from "../shared/comun.js";
+import { selectorMes } from "../shared/selectores.js";
 import { vistaPanel } from "./panel.js";
 import { vistaConsultas } from "./consultas.js";
 import { vistaFototeca } from "./fototeca.js";
@@ -67,7 +68,7 @@ const medidor = (m) => { const p = pctDe(m.valor, m.meta); return h("div", { cla
   m.meta ? h("div", { class: "gauge " + clase(p), role: "img", "aria-label": `${p}% de la meta` }, h("i", { style: `transform:scaleX(${p / 100})` })) : ""); };
 
 async function vistaCumplimiento(c) {
-  const mes = h("input", { type: "month", value: S.mes, "aria-label": "Mes", onchange: () => { S.mes = mes.value || mesActual(); render(); } });
+  const mes = selectorMes({ value: S.mes, "aria-label": "Mes", onchange: (v) => { S.mes = v || mesActual(); render(); } });
   c.replaceChildren(h("div", { class: "cargando" }, sk("l-tira", "height:70px;border-radius:22px;margin-bottom:14px"), skTarjetas(6)));
   let d, est;
   try { [d, est] = await Promise.all([api("/api/cumplimiento?mes=" + S.mes), api("/api/estado").catch(() => null)]); }

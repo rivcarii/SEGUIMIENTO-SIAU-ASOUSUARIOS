@@ -1,5 +1,6 @@
 // Panel de inicio: una franja de cifras y, debajo, figuras con su pie (como una lámina de cuaderno).
 import { api, h, mesLegible, sk, skFigura } from "../shared/comun.js";
+import { selectorMes } from "../shared/selectores.js";
 import { COLOR, barrasMes, area, segmentada, barrasH, avance, leyenda } from "../shared/graficos.js";
 
 const miles = (n) => Number(n).toLocaleString("es-CO");
@@ -29,7 +30,7 @@ export async function vistaPanel(c, S, ir, render) {
   let p, est = null;
   try { [p, est] = await Promise.all([api("/api/panel?mes=" + S.mes), api("/api/estado").catch(() => null)]); } catch (e) { return c.replaceChildren(h("div", { class: "msg err" }, e.message)); }
   const r = p.resumen, e = r.estados, base = r.evaluados;
-  const mes = h("input", { type: "month", value: S.mes, "aria-label": "Mes", onchange: () => { S.mes = mes.value || S.mes; render(); } });
+  const mes = selectorMes({ value: S.mes, "aria-label": "Mes", onchange: (v) => { S.mes = v || S.mes; render(); } });
   const sinDatos = !r.encuestas.valor && !r.charlas.valor && !(r.actas?.esperadas);
 
   const t5Pie = (p) => (p.top.length ? `${p.top.filter((t) => t.puntaje >= 100).length} de los ${p.top.length} ya cumplen sus dos metas` : "");
