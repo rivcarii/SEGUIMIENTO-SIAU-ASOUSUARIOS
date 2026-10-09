@@ -1,5 +1,7 @@
 # SEGUIMIENTO-SIAU-ASOUSUARIOS
 
+> **¿Poner todo en marcha?** Siga [INSTALAR.md](INSTALAR.md).
+
 Plataforma de evidencias (SIAU + Asociación de Usuarios)
 
 Dos aplicaciones conectadas por la misma base de datos, sin dependencias externas (Node ≥ 22.13):

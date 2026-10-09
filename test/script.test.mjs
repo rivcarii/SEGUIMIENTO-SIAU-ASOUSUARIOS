@@ -40,3 +40,51 @@ test("servidor: lo que el script filtra pasa la barrera; el archivo completo sin
     assert.throws(() => rechazarPersonales(g), /datos personales/);
   }
 });
+
+// ── autoconfigurar y verificarConexion, con servicios de Google simulados
+function entorno({ archivos = [], props = {}, http = () => ({ code: 200, text: "{}" }) } = {}) {
+  const guardadas = { ...props }, logs = [];
+  const archivo = (nombre, id, edad, padre = null) => ({ getName: () => nombre, getId: () => id, getLastUpdated: () => edad, getParents: () => { const q = padre ? [{ getId: () => padre.id, getName: () => padre.n }] : []; return { hasNext: () => q.length > 0, next: () => q.shift() }; } });
+  const ctx = {
+    console: { log: (t) => logs.push(t) },
+    DriveApp: { searchFiles: () => { const q = archivos.map((a) => archivo(a[0], a[1], a[2], a[3])); return { hasNext: () => q.length > 0, next: () => q.shift() }; } },
+    PropertiesService: { getScriptProperties: () => ({ getProperties: () => ({ ...guardadas }), setProperty: (k, v) => { guardadas[k] = v; } }) },
+    UrlFetchApp: { fetch: (url, o) => { const r = http(url, o); return { getResponseCode: () => r.code, getContentText: () => r.text }; } },
+  };
+  vm.createContext(ctx);
+  vm.runInContext(codigo, ctx);
+  return { ctx, guardadas, logs };
+}
+
+test("autoconfigurar: reconoce cada consolidado por su nombre y no confunde NPS con evaluación médica", () => {
+  const { ctx, guardadas } = entorno({
+    archivos: [
+      ["CONS_CHARLAS_2026", "id-charlas", 5], ["CONS_BUZON_2026", "id-buzon-nuevo", 9], ["CONS_BUZON_2026 (copia antigua)", "id-buzon-viejo", 1],
+      ["SATISFACCIÓN DE LOS USUARIOS MiRed IPS NPS. 2026 (respuestas)", "id-nps", 4], ["Evaluación de la satisfacción médica (respuestas)", "id-medica", 3],
+      ["REGISTRO DE ATENCIONES ILSC MIRED IPS", "id-ilsc", 2], ["Consolidado_PQRS_2026", "id-pqrs", 8],
+      ["Horario Agosto 2026 - SIAU", "h-ago", 6, { id: "carpeta-h", n: "Horarios" }], ["Horario Septiembre 2026 - SIAU", "h-sep", 7, { id: "carpeta-h", n: "Horarios" }], ["Horario Médicos", "h-med", 9, { id: "otra", n: "Médicos" }],
+    ],
+  });
+  const informe = ctx.autoconfigurar();
+  assert.deepEqual(guardadas, { ID_CHARLAS: "id-charlas", ID_BUZON: "id-buzon-nuevo", ID_NPS: "id-nps", ID_MEDICA: "id-medica", ID_ILSC: "id-ilsc", CARPETA_HORARIOS: "carpeta-h" });
+  assert.ok(informe.some((l) => /ID_BUZON: REVISAR \(2 candidatos/.test(l)));
+  assert.ok(informe.some((l) => /ID_NPS: OK/.test(l)));
+});
+
+test("autoconfigurar: avisa lo que no encuentra y no pisa lo ya configurado", () => {
+  const { ctx, guardadas } = entorno({ archivos: [["CONS_CHARLAS_2026", "nuevo", 1]], props: { ID_CHARLAS: "manual" } });
+  const informe = ctx.autoconfigurar();
+  assert.equal(guardadas.ID_CHARLAS, "manual");
+  assert.ok(informe.some((l) => /ID_CHARLAS: ya configurado/.test(l)));
+  assert.ok(informe.some((l) => /ID_BUZON: NO ENCONTRADO/.test(l)));
+  assert.ok(informe.some((l) => /CARPETA_HORARIOS: NO ENCONTRADA/.test(l)));
+});
+
+test("verificarConexion: mensajes claros para dirección inalcanzable, dirección equivocada y token incorrecto", () => {
+  const p = { PLATAFORMA_URL: "https://x.test", BOT_TOKEN: "t" };
+  const caso = (http) => entorno({ http }).ctx.verificarConexion(p);
+  assert.doesNotThrow(() => caso(() => ({ code: 200, text: "{}" })));
+  assert.throws(() => caso(() => { throw new Error("DNS"); }), /No se pudo llegar a https:\/\/x.test/);
+  assert.throws(() => caso(() => ({ code: 404, text: "" })), /¿es la dirección de la plataforma/);
+  assert.throws(() => caso((u) => (u.endsWith("/api/salud") ? { code: 200, text: "{}" } : { code: 401, text: "" })), /rechazó el BOT_TOKEN/);
+});

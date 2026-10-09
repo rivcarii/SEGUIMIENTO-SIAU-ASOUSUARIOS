@@ -1,22 +1,18 @@
 /**
  * Enlace de consolidados SIAU → Plataforma de evidencias.
  *
- * Se instala UNA vez, iniciando sesión como siau@miredips.org:
+ * INSTALACIÓN (una sola vez, iniciando sesión como siau@miredips.org) — ver también INSTALAR.md:
  *   1. script.google.com → Nuevo proyecto → pegar este archivo.
- *   2. ⚙ Configuración del proyecto → Propiedades del script → agregar:
+ *   2. ⚙ Configuración del proyecto → Propiedades del script → agregar SOLO estas dos:
  *        PLATAFORMA_URL   https://… (dirección pública de la plataforma, sin «/» final)
  *        BOT_TOKEN        el mismo valor que BOT_TOKEN en el servidor
- *        ID_CHARLAS       Hoja de Google «CONS_CHARLAS_2026»
- *        ID_BUZON         Hoja de Google «CONS_BUZON_2026»
- *        ID_NPS           Hoja de respuestas «SATISFACCIÓN DE LOS USUARIOS … NPS 2026»
- *        ID_MEDICA        Hoja de respuestas «Evaluación de la satisfacción médica»
- *        ID_ILSC          Hoja de Google «REGISTRO DE ATENCIONES ILSC»
- *        CARPETA_HORARIOS Carpeta de Drive con los «Horario <Mes> <año> - SIAU»
- *      (el ID es la parte larga de la dirección del archivo o carpeta; cualquiera que falte se omite)
- *   3. Ejecutar «probarEnlace» (pide permisos la primera vez) y luego «instalarActivadorDiario».
+ *   3. Ejecutar «autoconfigurar»: busca por nombre los archivos de consolidados y la carpeta de horarios y
+ *      guarda sus ID. Revise en el registro de ejecución que cada uno sea el correcto.
+ *   4. Ejecutar «probarEnlace» (pide permisos la primera vez; verifica la conexión y sincroniza) y por último
+ *      «instalarActivadorDiario» (sincroniza todos los días a las 6 a. m.).
  *
  * Los archivos deben ser Hojas de Google. Si alguno es un Excel (.xlsx): ábralo en Drive →
- * Archivo → Guardar como Hoja de cálculo de Google, y use el ID de esa copia.
+ * Archivo → Guardar como Hoja de cálculo de Google.
  *
  * PRIVACIDAD (Ley 1581): las respuestas de los formularios y el registro del intérprete traen nombres,
  * cédulas, teléfonos y correos. Este script NUNCA los envía: de cada hoja toma solo las columnas de la
@@ -70,9 +66,61 @@ function enviar(p, cuerpo) {
     ' · ' + (j.avisos || []).length + ' aviso(s)' + (nr.length ? ' · SEDES NO RECONOCIDAS: ' + nr.join(', ') : '');
 }
 
+/** Comprueba que la plataforma responde y que el BOT_TOKEN es el correcto, con mensajes que dicen qué corregir. */
+function verificarConexion(p) {
+  let r;
+  try { r = UrlFetchApp.fetch(p.PLATAFORMA_URL + '/api/salud', { muteHttpExceptions: true }); }
+  catch (e) { throw new Error('No se pudo llegar a ' + p.PLATAFORMA_URL + ' (' + e.message + '). Revise PLATAFORMA_URL y que la plataforma esté en línea.'); }
+  if (r.getResponseCode() !== 200) throw new Error('PLATAFORMA_URL responde ' + r.getResponseCode() + ' en /api/salud: ¿es la dirección de la plataforma?');
+  r = UrlFetchApp.fetch(p.PLATAFORMA_URL + '/api/bot/estado', { headers: { Authorization: 'Bearer ' + p.BOT_TOKEN }, muteHttpExceptions: true });
+  if (r.getResponseCode() === 401) throw new Error('La plataforma rechazó el BOT_TOKEN: debe ser idéntico al BOT_TOKEN del servidor.');
+  if (r.getResponseCode() !== 200) throw new Error('La plataforma respondió ' + r.getResponseCode() + ' al verificar el BOT_TOKEN.');
+}
+
+// Cómo reconocer cada archivo por su nombre: [propiedad, búsqueda en Drive, filtro sobre el nombre normalizado]
+const BUSQUEDAS = [
+  ['ID_CHARLAS', "title contains 'CONS_CHARLAS'", function (n) { return n.indexOf('cons charlas') >= 0; }],
+  ['ID_BUZON', "title contains 'CONS_BUZON'", function (n) { return n.indexOf('cons buzon') >= 0; }],
+  ['ID_NPS', "title contains 'NPS'", function (n) { return n.indexOf('nps') >= 0 && n.indexOf('satisfac') >= 0 && n.indexOf('medic') < 0; }],
+  ['ID_MEDICA', "title contains 'satisfac'", function (n) { return n.indexOf('satisfac') >= 0 && n.indexOf('medic') >= 0; }],
+  ['ID_ILSC', "title contains 'ILSC'", function (n) { return n.indexOf('ilsc') >= 0; }],
+];
+
+function candidatos(consulta, filtro) {
+  const it = DriveApp.searchFiles("mimeType = 'application/vnd.google-apps.spreadsheet' and trashed = false and " + consulta);
+  const r = [];
+  while (it.hasNext()) { const f = it.next(); if (filtro(norm(f.getName()))) r.push(f); }
+  return r.sort(function (a, b) { return b.getLastUpdated() - a.getLastUpdated(); });
+}
+
+/**
+ * Busca por nombre los archivos de consolidados y la carpeta de horarios y guarda sus ID en las propiedades del script.
+ * No pisa lo que ya esté configurado. Si hay varios candidatos elige el modificado más recientemente y lo marca «REVISAR».
+ */
+function autoconfigurar() {
+  const props = PropertiesService.getScriptProperties(), actuales = props.getProperties(), informe = [];
+  BUSQUEDAS.forEach(function (b) {
+    if (actuales[b[0]]) { informe.push(b[0] + ': ya configurado'); return; }
+    const c = candidatos(b[1], b[2]);
+    if (!c.length) { informe.push(b[0] + ': NO ENCONTRADO (¿es una Hoja de Google? ¿el nombre cambió?)'); return; }
+    props.setProperty(b[0], c[0].getId());
+    informe.push(b[0] + ': ' + (c.length === 1 ? 'OK' : 'REVISAR (' + c.length + ' candidatos; se eligió el más reciente)') + ' · «' + c[0].getName() + '»');
+  });
+  if (actuales.CARPETA_HORARIOS) informe.push('CARPETA_HORARIOS: ya configurado');
+  else {
+    const h = candidatos("title contains 'Horario'", function (n) { return /^horario/.test(n) && n.indexOf('siau') >= 0; });
+    const padre = h.length ? h[0].getParents() : null;
+    if (padre && padre.hasNext()) { const c = padre.next(); props.setProperty('CARPETA_HORARIOS', c.getId()); informe.push('CARPETA_HORARIOS: OK · carpeta «' + c.getName() + '» (por «' + h[0].getName() + '»)'); }
+    else informe.push('CARPETA_HORARIOS: NO ENCONTRADA (suba un «Horario <Mes> <año> - SIAU» como Hoja de Google)');
+  }
+  console.log(informe.join('\n'));
+  return informe;
+}
+
 function sincronizar() {
   const p = PropertiesService.getScriptProperties().getProperties();
   ['PLATAFORMA_URL', 'BOT_TOKEN'].forEach(function (k) { if (!p[k]) throw new Error('Falta la propiedad del script: ' + k); });
+  verificarConexion(p);
   const anio = new Date().getFullYear();
   const informe = [], errores = [];
 

@@ -42,6 +42,8 @@ const exigirBot = (req) => {
   if (!BOT_TOKEN || !t || !igualesSeguro(t, BOT_TOKEN)) throw new HttpError(401, "Token inválido");
 };
 
+const ipDe = (req) => (process.env.TRUST_PROXY ? req.headers["x-forwarded-for"]?.split(",")[0].trim() : null) || req.socket.remoteAddress || "?";
+const seguro = (req) => (req.headers["x-forwarded-proto"] === "https" ? "; Secure" : "");
 const intentos = new Map();
 function limitarLogin(ip) {
   const ahora = Date.now(), r = (intentos.get(ip) ?? []).filter((t) => ahora - t < 15 * 60e3);
@@ -300,14 +302,15 @@ async function api(req, res, url) {
   let r;
 
   if (m === "POST" && p === "/api/login") {
-    limitarLogin(req.socket.remoteAddress ?? "?");
+    limitarLogin(ipDe(req));
     const { password } = await leerJson(req);
     const rol = igualesSeguro(password ?? "", ADMIN_PASSWORD) ? "admin" : VISOR_PASSWORD && igualesSeguro(password ?? "", VISOR_PASSWORD) ? "visor" : null;
     if (!rol) throw new HttpError(401, "Contraseña incorrecta");
     const tok = firmar({ rol, exp: Date.now() + 12 * 3600e3 }, SECRETO);
-    return send(res, 200, JSON.stringify({ rol }), { "content-type": "application/json", "set-cookie": `sess=${tok}; HttpOnly; SameSite=Strict; Path=/; Max-Age=43200` });
+    return send(res, 200, JSON.stringify({ rol }), { "content-type": "application/json", "set-cookie": `sess=${tok}; HttpOnly; SameSite=Strict; Path=/; Max-Age=43200${seguro(req)}` });
   }
   if (m === "POST" && p === "/api/logout") return send(res, 200, "{}", { "content-type": "application/json", "set-cookie": "sess=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0" });
+  if (m === "GET" && p === "/api/salud") return json(res, { ok: true });
   if (m === "GET" && p === "/api/sesion") return json(res, { rol: sesion(req)?.rol ?? null, visor_protegido: Boolean(VISOR_PASSWORD) });
 
   // ----- Lectura (visor)

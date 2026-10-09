@@ -63,6 +63,7 @@ async function conServidor(fn) {
 
 test("monitor de punta a punta: detecta fuentes faltantes y publica el resumen en el tablero", async () => {
   await conServidor(async (base, dir) => {
+    assert.equal((await fetch(base + "/api/salud")).status, 200);
     const est = await (await fetch(base + "/api/bot/estado", { headers: { authorization: "Bearer tok" } })).json();
     assert.equal(est.fuentes.length, 0);
     assert.equal((await fetch(base + "/api/bot/estado")).status, 401);
