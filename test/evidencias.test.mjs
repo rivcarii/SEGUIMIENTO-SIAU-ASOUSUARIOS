@@ -1,22 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { viernesDelMes, tipoImagen, firmar, verificar, calcularCumplimiento } from "../lib.mjs";
+import { viernesDelMes, calcularCumplimiento } from "../nucleo/lib.mjs";
 
 test("viernes de octubre 2026", () => assert.deepEqual(viernesDelMes("2026-10"), ["2026-10-02", "2026-10-09", "2026-10-16", "2026-10-23", "2026-10-30"]));
-
-test("tipoImagen valida firma, no extensión", () => {
-  assert.equal(tipoImagen(Buffer.from("ffd8ffe000104a464946000101010048", "hex")), "jpg");
-  assert.equal(tipoImagen(Buffer.from("<svg xmlns=...></svg>")), null);
-  assert.equal(tipoImagen(Buffer.from("GIF89a000000000000")), null);
-});
-
-test("token firmado: rechaza manipulado y vencido", () => {
-  const t = firmar({ rol: "admin", exp: Date.now() + 1000 }, "s");
-  assert.equal(verificar(t, "s").rol, "admin");
-  assert.equal(verificar(t, "otro"), null);
-  assert.equal(verificar(firmar({ rol: "admin", exp: Date.now() - 1 }, "s"), "s"), null);
-  assert.equal(verificar(t.replace(/^./, "x"), "s"), null);
-});
 
 test("cumplimiento: totales, por técnico y actas faltantes", () => {
   const r = calcularCumplimiento({

@@ -1,31 +1,23 @@
-import { abrirLibro } from "/shared/xlsx.js";
-import { prepararLibro, ETIQUETAS } from "/shared/preparar.js";
-import { api, h, fechaHoy, fmtFecha, mesActual, opciones, pintarMarca, mascota, tituloGrande } from "/shared/comun.js";
+import { abrirLibro } from "../shared/xlsx.js";
+import { prepararLibro, ETIQUETAS } from "../shared/preparar.js";
+import { api, h, fechaHoy, fmtFecha, mesActual, opciones, pintarMarca, mascota, tituloGrande } from "../shared/comun.js";
 
-const app = document.getElementById("app"), salir = document.getElementById("salir");
+const app = document.getElementById("app");
 let cfg, seccion = "nueva", titulo;
 const aviso = (el, ok, texto) => el.replaceChildren(h("div", { class: "msg " + (ok ? "ok" : "err") }, texto));
 
 async function iniciar() {
-  const s = await api("/api/sesion");
-  if (s.rol !== "admin") return login();
-  cfg = await api("/api/config");
+  try {
+    const s = await api("/api/sesion");
+    if (s.rol !== "admin") throw new Error("Solo los administradores pueden entrar aquí.");
+    cfg = await api("/api/config");
+  } catch (e) { return app.replaceChildren(h("div", { class: "login" }, mascota("celular", 170), h("div", { class: "card" }, h("h2", {}, "No se pudo abrir"), h("p", {}, e.message)))); }
   pintarMarca(cfg.marca);
   titulo = tituloGrande("Panel de administración · 2026", "Administrador de evidencias");
-  salir.hidden = false;
-  salir.onclick = async () => { await api("/api/logout", { json: {} }); location.reload(); };
   render();
 }
 
-function login() {
-  const pw = h("input", { type: "password", autocomplete: "current-password", required: true }), msg = h("div");
-  app.replaceChildren(h("div", { class: "login" }, mascota("celular", 190), h("form", { class: "card", onsubmit: async (ev) => {
-    ev.preventDefault();
-    try { await api("/api/login", { json: { password: pw.value } }); iniciar(); } catch (e) { aviso(msg, false, e.message); }
-  } }, h("h2", {}, "Acceso administrador"), h("label", {}, "Contraseña"), pw, msg, h("p", {}, h("button", { class: "btn" }, "Entrar")))));
-}
-
-const SECCIONES = [["nueva", "Nueva evidencia"], ["lista", "Evidencias"], ["importar", "Importar consolidados"], ["personal", "Personal y rotación"], ["catalogos", "Sedes y técnicos"], ["metas", "Metas"], ["marca", "Logos"]];
+const SECCIONES = [["nueva", "Nueva evidencia"], ["lista", "Evidencias"], ["importar", "Consolidados"], ["personal", "Personal y rotación"], ["catalogos", "Sedes y técnicos"], ["metas", "Metas"], ["marca", "Nombres"]];
 function render() {
   const cont = h("div");
   app.replaceChildren(titulo.el, h("nav", { class: "tabs glass" }, SECCIONES.map(([k, n]) => h("button", { "aria-pressed": k === seccion, onclick: () => { seccion = k; render(); } }, n))), cont);
@@ -43,7 +35,16 @@ async function reducir(file, max = 1600) {
   c.getContext("2d").drawImage(bmp, 0, 0, c.width, c.height);
   return new Promise((ok) => c.toBlob((b) => ok(b ?? file), "image/jpeg", 0.85));
 }
-async function subir(blob) { return (await api("/api/admin/foto", { method: "POST", body: blob, headers: { "content-type": blob.type } })).archivo; }
+const aBase64 = (blob) => new Promise((ok, no) => { const r = new FileReader(); r.onload = () => ok(String(r.result).split(",")[1]); r.onerror = () => no(new Error("No se pudo leer la imagen")); r.readAsDataURL(blob); });
+async function subir(blob) { return (await api("/api/admin/foto", { json: { base64: await aBase64(blob), tipo: blob.type } })).archivo; }
+/** Miniatura JPEG diminuta (≤ 40 000 caracteres) que viaja dentro del propio registro para que el visor la muestre al instante. */
+async function miniatura(blob) {
+  const bmp = await createImageBitmap(blob), k = Math.min(1, 280 / Math.max(bmp.width, bmp.height));
+  const c = document.createElement("canvas"); c.width = Math.max(1, Math.round(bmp.width * k)); c.height = Math.max(1, Math.round(bmp.height * k));
+  c.getContext("2d").drawImage(bmp, 0, 0, c.width, c.height);
+  for (const q of [0.7, 0.55, 0.4, 0.25]) { const u = c.toDataURL("image/jpeg", q); if (u.length <= 40000) return u; }
+  return null;
+}
 
 // ---- Nueva / editar evidencia
 function formEvidencia(cont, ev = null, alGuardar = null) {
@@ -55,17 +56,31 @@ function formEvidencia(cont, ev = null, alGuardar = null) {
   opciones(f.sede, cfg.sedes.filter((s) => s.activa), "id", "nombre", "— sin sede —");
   opciones(f.tecnico, cfg.tecnicos.filter((t) => t.activo), "id", "nombre", "— sin técnico —");
   if (ev) { f.tipo.value = ev.tipo; f.sede.value = ev.sede_id ?? ""; f.tecnico.value = ev.tecnico_id ?? ""; }
-  let fotosActuales = [...(ev?.fotos ?? [])].map((s) => s.replace("/uploads/", ""));
+  let fotosActuales = [...(ev?.fotos_ids ?? [])];
   const prev = h("div", { class: "thumbs" }), msg = h("div"), btn = h("button", { class: "btn" }, ev ? "Guardar cambios" : "Guardar evidencia");
-  const pintarPrev = () => prev.replaceChildren(...fotosActuales.map((a, i) => h("span", {}, h("img", { src: "/uploads/" + a, alt: "" }), h("button", { type: "button", class: "btn sec", title: "Quitar", onclick: () => { fotosActuales.splice(i, 1); pintarPrev(); } }, "×"))));
+  const quitar = (i) => () => { fotosActuales.splice(i, 1); pintarPrev(); };
+  const pintarPrev = () => prev.replaceChildren(...fotosActuales.map((a, i) => h("span", {}, i === 0 && ev?.portada && a === ev.fotos_ids[0] ? h("img", { src: ev.portada, alt: "" }) : h("span", { class: "mut" }, "Foto " + (i + 1)),
+    h("button", { type: "button", class: "btn sec", title: "Quitar", "aria-label": "Quitar foto " + (i + 1), onclick: quitar(i) }, "×"))));
   pintarPrev();
 
   const form = h("form", { class: "card", onsubmit: async (e) => {
     e.preventDefault(); btn.disabled = true; msg.replaceChildren(h("div", { class: "msg" }, "Subiendo…"));
     try {
       const nuevas = [];
-      for (const file of f.fotos.files) nuevas.push(await subir(await reducir(file)));
-      const body = { tipo: f.tipo.value, fecha: f.fecha.value, sede_id: f.sede.value, tecnico_id: f.tecnico.value, titulo: f.titulo.value, descripcion: f.desc.value, cantidad: f.cant.value, asistentes: f.asist.value, fotos: [...fotosActuales, ...nuevas] };
+      let portadaNueva = null;
+      for (const file of f.fotos.files) {
+        const blob = await reducir(file);
+        if (!nuevas.length) portadaNueva = await miniatura(blob).catch(() => null);
+        nuevas.push(await subir(blob));
+      }
+      const ids = [...fotosActuales, ...nuevas];
+      let portada = null;
+      if (ids.length) {
+        if (ev?.portada && ids[0] === ev.fotos_ids[0]) portada = ev.portada;
+        else if (ids[0] === nuevas[0]) portada = portadaNueva;
+        else { const d = await api("/api/foto?id=" + encodeURIComponent(ids[0])); portada = await miniatura(await (await fetch(d.data)).blob()).catch(() => null); }
+      }
+      const body = { tipo: f.tipo.value, fecha: f.fecha.value, sede_id: f.sede.value, tecnico_id: f.tecnico.value, titulo: f.titulo.value, descripcion: f.desc.value, cantidad: f.cant.value, asistentes: f.asist.value, fotos: ids, portada };
       if (ev) await api("/api/admin/evidencias/" + ev.id, { method: "PUT", json: body }); else await api("/api/admin/evidencias", { json: body });
       if (alGuardar) return alGuardar();
       form.reset(); fotosActuales = []; pintarPrev(); f.fecha.value = fechaHoy(); aviso(msg, true, "Evidencia guardada.");
@@ -90,7 +105,7 @@ async function listaEvidencias(cont) {
     if (tipo.value) q.set("tipo", tipo.value); if (sede.value) q.set("sede", sede.value);
     const r = await api("/api/evidencias?" + q);
     tabla.replaceChildren(h("div", { class: "card scroll" }, h("table", {}, h("thead", {}, h("tr", {}, ["Fecha", "Tipo", "Título", "Sede", "Fotos", ""].map((t) => h("th", {}, t)))),
-      h("tbody", {}, r.items.map((e) => h("tr", {}, h("td", {}, fmtFecha(e.fecha)), h("td", {}, e.tipo_nombre), h("td", {}, e.titulo), h("td", {}, e.sede ?? ""), h("td", {}, String(e.fotos.length)),
+      h("tbody", {}, r.items.map((e) => h("tr", {}, h("td", {}, fmtFecha(e.fecha)), h("td", {}, e.tipo_nombre), h("td", {}, e.titulo), h("td", {}, e.sede ?? ""), h("td", {}, String(e.fotos_ids.length)),
         h("td", {}, h("button", { class: "btn sec", onclick: () => formEvidencia(cont, e, () => { listaEvidencias(cont); }) }, "Editar"), " ",
           h("button", { class: "btn del", onclick: async () => { if (confirm(`¿Eliminar "${e.titulo}" y sus fotos?`)) { await api("/api/admin/evidencias/" + e.id, { method: "DELETE" }); recargar(); } } }, "Eliminar"))))))));
   }
@@ -125,21 +140,43 @@ function metas(cont) {
     })))));
 }
 
-// ---- Logos / marca
+// ---- Nombres de los módulos (los logos son los de la identidad de imagen y no se cambian aquí)
 function marca(cont) {
   const msg = h("div"), n1 = h("input", { type: "text", value: cfg.marca.nombre_siau }), n2 = h("input", { type: "text", value: cfg.marca.nombre_asociacion });
-  const logo = (k, etiqueta) => {
-    const inp = h("input", { type: "file", accept: "image/jpeg,image/png,image/webp" });
-    return h("div", { class: "card" }, h("h3", {}, etiqueta), cfg.marca["logo_" + k] ? h("img", { src: cfg.marca["logo_" + k], style: "max-height:80px;max-width:100%", alt: etiqueta }) : h("p", { class: "mut" }, "Sin logo cargado."), h("p", {}, inp),
-      h("button", { class: "btn", onclick: async () => { if (!inp.files[0]) return; try { await api("/api/admin/logo/" + k, { method: "POST", body: inp.files[0], headers: { "content-type": inp.files[0].type } }); cfg = await api("/api/config"); pintarMarca(cfg.marca); marca(cont); } catch (e) { aviso(msg, false, e.message); } } }, "Subir logo"));
-  };
-  cont.replaceChildren(msg, h("div", { class: "row" }, logo("siau", "Logo SIAU"), logo("asociacion", "Logo Asociación de Usuarios")),
-    h("div", { class: "card", style: "margin-top:14px" }, h("h3", {}, "Nombres"), h("label", {}, "Nombre del módulo SIAU"), n1, h("label", {}, "Nombre del módulo Asociación"), n2,
-      h("p", {}, h("button", { class: "btn", onclick: async () => { await api("/api/admin/marca", { method: "PUT", json: { nombre_siau: n1.value, nombre_asociacion: n2.value } }); cfg = await api("/api/config"); pintarMarca(cfg.marca); aviso(msg, true, "Guardado."); } }, "Guardar nombres"))));
+  cont.replaceChildren(msg, h("div", { class: "card" }, h("h3", {}, "Nombres"), h("label", {}, "Nombre del módulo SIAU"), n1, h("label", {}, "Nombre del módulo Asociación"), n2,
+    h("p", {}, h("button", { class: "btn", onclick: async () => { try { await api("/api/admin/marca", { method: "PUT", json: { nombre_siau: n1.value, nombre_asociacion: n2.value } }); cfg = await api("/api/config"); pintarMarca(cfg.marca); aviso(msg, true, "Guardado."); } catch (e) { aviso(msg, false, e.message); } } }, "Guardar nombres"))));
 }
+
+// ---- Sincronización con los consolidados de Drive (los lee el servidor con la cuenta que instaló el script)
+function panelDrive() {
+  const salida = h("div"), btn = h("button", { class: "btn" }, "Actualizar desde Drive"), estadoEl = h("div");
+  const pintarEstado = async () => {
+    try {
+      const e = await api("/api/admin/estado");
+      const hall = e.hallazgos.filter((x) => x.nivel !== "info");
+      estadoEl.replaceChildren(
+        h("p", { class: "mut" }, e.fuentes.length ? "Última lectura: " + e.fuentes.map((f) => `${ETIQUETAS[f.tipo] ?? f.tipo} (${f.creado})`).join(" · ") : "Todavía no se ha leído ningún consolidado."),
+        ...(hall.length ? hall.map((x) => h("div", { class: "msg " + (x.nivel === "alto" ? "err" : "") }, x.texto)) : [h("div", { class: "msg ok" }, "Sin hallazgos: las fuentes están al día.")]));
+    } catch (er) { estadoEl.replaceChildren(h("div", { class: "msg err" }, er.message)); }
+  };
+  btn.onclick = async () => {
+    btn.disabled = true; salida.replaceChildren(h("div", { class: "msg" }, "Leyendo los consolidados de Drive… puede tardar un minuto."));
+    try {
+      const r = await api("/api/admin/sincronizar-drive", { method: "POST", json: {} });
+      salida.replaceChildren(...r.informe.map((l) => h("div", { class: "msg ok" }, l)), ...r.errores.map((l) => h("div", { class: "msg err" }, l)));
+    } catch (er) { salida.replaceChildren(h("div", { class: "msg err" }, er.message)); }
+    btn.disabled = false; pintarEstado();
+  };
+  pintarEstado();
+  return h("div", { class: "card" }, h("h3", {}, "Consolidados de Drive"),
+    h("p", { class: "mut" }, "La plataforma lee sola, todos los días a las 6 a. m., los consolidados de la cuenta institucional del SIAU. Use este botón para actualizar en el momento. Solo se leen fecha, sede y calificación; nunca nombres, cédulas, teléfonos ni correos de los usuarios."),
+    p0(btn), salida, estadoEl);
+}
+const p0 = (...x) => h("p", {}, ...x);
 
 // ---- Importar consolidados: se leen los .xlsx en este navegador y solo se envían las columnas permitidas
 function importar(cont) {
+  const drive = panelDrive();
   const archivos = h("input", { type: "file", multiple: true, accept: ".xlsx" }), lista = h("div");
   const btn = h("button", { class: "btn", onclick: async () => {
     if (!archivos.files.length) return lista.replaceChildren(h("div", { class: "msg err" }, "Elija uno o más archivos .xlsx."));
@@ -161,7 +198,7 @@ function importar(cont) {
     }
     btn.disabled = false;
   } }, "Leer y enviar");
-  cont.replaceChildren(h("div", { class: "card" }, h("h3", {}, "Importar consolidados"),
+  cont.replaceChildren(drive, h("div", { class: "card", style: "margin-top:14px" }, h("h3", {}, "Importar a mano (alternativa)"),
     h("p", { class: "mut" }, "Descargue los consolidados de Drive como Excel (Archivo → Descargar → Microsoft Excel .xlsx) y súbalos aquí; puede elegir varios a la vez: charlas, buzón, NPS, evaluación médica, registro del intérprete y el horario del mes. La plataforma los reconoce sola."),
     h("p", { class: "mut" }, "Privacidad: los archivos se leen en este navegador. De los formularios y del registro del intérprete solo se envían la fecha, la sede y la calificación; nombres, cédulas, teléfonos y correos no salen de su computador. Volver a importar un consolidado reemplaza la versión anterior."),
     archivos, h("p", {}, btn)), lista);

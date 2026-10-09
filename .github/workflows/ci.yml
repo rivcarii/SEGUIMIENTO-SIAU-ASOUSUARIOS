@@ -17,3 +17,7 @@ jobs:
         with:
           node-version: 22
       - run: npm test
+      - name: dist/Codigo.gs está al día
+        run: |
+          npm run construir
+          git diff --exit-code dist/Codigo.gs

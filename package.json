@@ -1,12 +1,11 @@
 {
   "name": "plataforma-evidencias",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
-  "description": "Visor + administrador de evidencias (SIAU y Asociación de Usuarios) y bot verificador de Drive. Sin dependencias.",
+  "description": "Visor + administrador de evidencias (SIAU y Asociación de Usuarios) como aplicación web de Google Apps Script. Sin dependencias.",
   "scripts": {
-    "start": "node iniciar.mjs",
-    "monitor": "node bot/monitor.mjs",
+    "construir": "node google/construir.mjs",
     "test": "node --test test/*.test.mjs"
   },
   "engines": { "node": ">=22.13" }

@@ -1,4 +1,4 @@
-import { api, h, mesActual, fmtFecha, opciones, pintarMarca, mascota, tituloGrande, mesLegible } from "/shared/comun.js";
+import { api, h, mesActual, fmtFecha, opciones, pintarMarca, mascota, tituloGrande, mesLegible, recurso } from "../shared/comun.js";
 
 const app = document.getElementById("app"), dlg = document.getElementById("dlg"), dlgc = document.getElementById("dlgc"), tabbar = document.getElementById("tabbar");
 const S = { cfg: null, area: "siau", vista: "cumplimiento", mes: mesActual(), filtros: {} };
@@ -9,19 +9,11 @@ let tg, seg, segThumb, cont, tabThumb;
 
 async function iniciar() {
   try { S.cfg = await api("/api/config"); }
-  catch (e) { return e.status === 401 ? login() : app.replaceChildren(h("div", { class: "msg err" }, e.message)); }
+  catch (e) { return app.replaceChildren(h("div", { class: "login" }, mascota("atento", 170), h("div", { class: "card" }, h("h2", {}, "No se pudo abrir"), h("p", {}, e.message)))); }
   pintarMarca(S.cfg.marca);
+  api("/api/sesion").then((u) => { if (u.rol === "admin") document.getElementById("irAdmin").hidden = false; }).catch(() => {});
   montar();
   render();
-}
-
-function login() {
-  const pw = h("input", { type: "password", autocomplete: "current-password", required: true }), msg = h("div");
-  app.replaceChildren(h("div", { class: "login" }, mascota("bienvenida", 190), h("form", { class: "card", onsubmit: async (ev) => {
-    ev.preventDefault();
-    try { await api("/api/login", { json: { password: pw.value } }); location.reload(); }
-    catch (e) { msg.replaceChildren(h("div", { class: "msg err" }, e.message)); }
-  } }, h("h2", {}, "Acceso al cuaderno"), h("label", {}, "Contraseña"), pw, msg, h("p", {}, h("button", { class: "btn" }, "Entrar")))));
 }
 
 // Estructura persistente: los indicadores deslizantes conservan su elemento y por eso animan entre estados.
@@ -35,7 +27,7 @@ function montar() {
   tabThumb = h("i", { class: "thumb" });
   tabbar.style.setProperty("--n", AREAS.length);
   tabbar.replaceChildren(tabThumb, ...AREAS.map((a) => h("button", { role: "tab", "data-area": a, onclick: () => { if (S.area !== a) { S.area = a; S.filtros = {}; S.vista = a === "siau" ? "cumplimiento" : "evidencias"; render(); } } },
-    h("img", { src: a === "siau" ? "/shared/marca/medalla.png" : "/shared/marca/asociacion-icono.png", alt: "" }), S.cfg.marca[a === "siau" ? "nombre_siau" : "nombre_asociacion"])));
+    h("img", { src: recurso(a === "siau" ? "/shared/marca/medalla.png" : "/shared/marca/asociacion-icono.png"), alt: "" }), S.cfg.marca[a === "siau" ? "nombre_siau" : "nombre_asociacion"])));
   tabbar.hidden = false;
 }
 
@@ -68,8 +60,8 @@ const medidor = (m) => { const p = pctDe(m.valor, m.meta); return h("div", { cla
 async function vistaCumplimiento(c) {
   const mes = h("input", { type: "month", value: S.mes, "aria-label": "Mes", onchange: () => { S.mes = mes.value || mesActual(); render(); } });
   c.append(h("p", { class: "mut" }, "Cargando…"));
-  let d, ver;
-  try { [d, ver] = await Promise.all([api("/api/cumplimiento?mes=" + S.mes), api("/api/verificacion")]); }
+  let d, est;
+  try { [d, est] = await Promise.all([api("/api/cumplimiento?mes=" + S.mes), api("/api/estado").catch(() => null)]); }
   catch (e) { return c.replaceChildren(h("div", { class: "msg err" }, e.message)); }
 
   const filas = d.siau.tecnicos, evaluados = filas.filter((t) => !t.ausente);
@@ -110,7 +102,8 @@ async function vistaCumplimiento(c) {
 
   const avisos = [d.sin_reconocer ? h("div", { class: "msg err" }, `${d.sin_reconocer} nombre(s) de sede de los consolidados no se reconocieron; no se están contando. Corríjalos en Administrador → Personal y rotación.`) : "",
     d.sincronizado ? h("p", { class: "leyenda" }, `Consolidados sincronizados: ${d.sincronizado} UTC.`) : ""];
-  const bot = ver ? h("p", { class: "leyenda" }, `Verificación del consolidado en Drive · periodo ${ver.periodo} · `, h("b", {}, ver.resumen.hallazgos?.length ? `${ver.resumen.hallazgos.length} hallazgo(s)` : "sin hallazgos")) : "";
+  const hall = (est?.hallazgos ?? []).filter((x) => x.nivel !== "info");
+  const bot = hall.length ? h("div", { class: "msg err" }, h("b", {}, "Atención con los datos: "), hall.slice(0, 4).map((x) => h("div", {}, "• " + x.texto))) : "";
 
   c.replaceChildren(hero, h("div", { class: "filters" }, h("label", { style: "margin:0" }, "Periodo de observación"), mes), ...avisos,
     sec(1, "Cumplimiento por SIAU"), tabla, h("p", { class: "leyenda" }, h("b", {}, "Tabla 1."), " Metas mínimas por SIAU. Lo registrado en cada sede se reparte entre quienes la atienden; la meta baja en proporción a los días de vacaciones o licencia."),
@@ -124,7 +117,7 @@ function vistaLudoteca(c) {
   c.append(sec(1, "Ludoteca"), h("div", { class: "card vacio", style: "flex-direction:column;text-align:center" },
     mascota("atento", 190), h("h2", {}, "En construcción"),
     h("p", { class: "mut", style: "max-width:52ch" }, "Aquí se mostrarán las actividades de ludoteca por mes, los niños y niñas atendidos, las encuestas aplicadas y las evidencias fotográficas. La fuente prevista es la hoja LUDOTECA del registro del intérprete."),
-    h("img", { src: "/shared/marca/ludoteca.png", alt: "Proyecto Ludoteca", style: "max-height:90px;max-width:80%" })));
+    h("img", { src: recurso("/shared/marca/ludoteca.png"), alt: "Proyecto Ludoteca", style: "max-height:90px;max-width:80%" })));
 }
 
 // ---------- Muestras (galería)
@@ -156,8 +149,15 @@ function vistaEvidencias(c) {
 
 function tarjeta(e, i) {
   return h("button", { class: "card ev", style: delay(i), onclick: () => detalle(e) },
-    h("div", { class: "ph" }, e.fotos[0] ? h("img", { src: e.fotos[0], alt: "", loading: "lazy" }) : "sin imagen"),
+    h("div", { class: "ph" }, e.portada ? h("img", { src: e.portada, alt: "", loading: "lazy" }) : e.fotos_ids.length ? "foto en Drive" : "sin imagen"),
     h("div", { class: "cu" }, h("div", { class: "id" }, "Muestra N.º " + String(e.id).padStart(4, "0")), h("span", { class: "badge" }, e.tipo_nombre), h("h3", {}, e.titulo), h("div", { class: "mut" }, [fmtFecha(e.fecha), e.sede].filter(Boolean).join(" · "))));
+}
+
+/** La foto completa se pide al abrir la muestra (viene de Drive por el servidor, no por un enlace público). */
+function foto(id, alt) {
+  const ph = h("div", { class: "mut", style: "padding:24px;text-align:center" }, "Cargando imagen…"), caja = h("div", {}, ph);
+  api("/api/foto?id=" + encodeURIComponent(id)).then((r) => caja.replaceChildren(h("a", { href: r.data, target: "_blank", rel: "noopener" }, h("img", { src: r.data, alt })))).catch((e) => ph.replaceChildren("No se pudo cargar: " + e.message));
+  return caja;
 }
 
 function detalle(e) {
@@ -165,8 +165,8 @@ function detalle(e) {
     h("div", { style: "display:flex;justify-content:space-between;gap:12px;align-items:flex-start" }, h("div", {}, h("div", { class: "kicker" }, "Muestra N.º " + String(e.id).padStart(4, "0")), h("span", { class: "badge" }, e.tipo_nombre), h("h2", { style: "margin:8px 0" }, e.titulo)), h("button", { class: "btn sec", onclick: () => dlg.close() }, "Cerrar")),
     h("p", { class: "mut num" }, [fmtFecha(e.fecha), e.sede, e.tecnico && "Técnico: " + e.tecnico, e.cantidad > 1 && `Cantidad: ${e.cantidad}`, e.asistentes != null && `Asistentes: ${e.asistentes}`].filter(Boolean).join(" · ")),
     e.descripcion ? h("p", { style: "white-space:pre-wrap" }, e.descripcion) : "",
-    h("div", { class: "fotos" }, e.fotos.map((src, i) => h("a", { href: src, target: "_blank", rel: "noopener" }, h("img", { src, alt: `${e.titulo} · imagen ${i + 1}`, loading: "lazy" })))),
-    e.fotos.length ? h("p", { class: "leyenda" }, h("b", {}, "Fig."), " Imágenes de respaldo de la actividad.") : "");
+    h("div", { class: "fotos" }, e.fotos_ids.map((id, i) => foto(id, `${e.titulo} · imagen ${i + 1}`))),
+    e.fotos_ids.length ? h("p", { class: "leyenda" }, h("b", {}, "Fig."), " Imágenes de respaldo de la actividad.") : "");
   dlg.showModal();
 }
 dlg.addEventListener("click", (ev) => { if (ev.target === dlg) dlg.close(); });

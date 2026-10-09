@@ -1,43 +1,47 @@
-# Puesta en marcha
+# Instalación (≈ 10 minutos, sin instalar nada)
 
-> **Para empezar a ver datos ya (en su computador):**
-> 1. Instale **Node.js** (versión «LTS», 22 o superior) desde <https://nodejs.org>.
-> 2. En GitHub: botón verde **Code → Download ZIP**; descomprima la carpeta.
-> 3. Haga **doble clic en `iniciar.bat`** (Windows) o en `iniciar.command` (Mac). La primera vez le pide una contraseña de administrador y abre el navegador en `http://localhost:3000/admin/`. **No cierre la ventana negra mientras la use.**
-> 4. En *Importar consolidados* suba los archivos Excel.
->
-> Si el navegador dice «no se puede acceder»: la ventana negra está cerrada o no arrancó; léale el mensaje (suele decir que falta Node.js o que es una versión antigua).
->
-> Lo de abajo es para **automatizarlo y que lo vea todo el equipo** (servidor público + script de Google), ≈30 minutos, una sola vez.
-Orden: **1) publicar la plataforma → 2) secretos del repositorio → 3) script en la cuenta siau@miredips.org → 4) comprobar.**
+Todo corre dentro de Google con la cuenta **siau@miredips.org**: no hay servidor, claves ni contraseñas que crear.
 
-## 1. Publicar la plataforma
-Necesita un servicio que ejecute contenedores (o Node 22) con **disco persistente** y HTTPS. Use el [`Dockerfile`](Dockerfile) de este repositorio (sin dependencias; *no se ha probado en un servicio concreto*). Variables de entorno:
+## 1. Publicar la interfaz (una sola vez, la hace quien administra el repositorio)
+GitHub → **Settings → Pages → Build and deployment → Source: GitHub Actions**. Luego ejecute el flujo «Publicar interfaz (GitHub Pages)» (Actions → Run workflow). Debe quedar en `https://rivcarii.github.io/SEGUIMIENTO-SIAU-ASOUSUARIOS/`.
+(Allí solo van estilos, scripts y logos; **ningún dato** de la plataforma.)
 
-| Variable | Valor |
+## 2. Crear el proyecto de Apps Script
+1. Inicie sesión como **siau@miredips.org** y abra <https://script.google.com> → **Nuevo proyecto**. Nómbrelo «Plataforma de evidencias SIAU».
+2. Borre el contenido de `Código.gs` y pegue **todo** el archivo [`dist/Codigo.gs`](dist/Codigo.gs).
+3. **⚙ Configuración del proyecto** → active «Mostrar el archivo de manifiesto appsscript.json» y reemplace su contenido por:
+   ```json
+   {
+     "timeZone": "America/Bogota",
+     "runtimeVersion": "V8",
+     "exceptionLogging": "STACKDRIVER",
+     "webapp": { "executeAs": "USER_DEPLOYING", "access": "DOMAIN" }
+   }
+   ```
+4. Guarde. Elija la función **`configurar`** y pulse **Ejecutar**. Acepte los permisos (Hojas, Drive, correo). Crea la base de datos (una Hoja) y la carpeta de fotos, y busca por nombre los consolidados. Revise el registro de ejecución: cada `ID_…` debe decir **OK** (si dice REVISAR, verifique que es el archivo correcto).
+   - Los consolidados deben ser **Hojas de Google**. Si alguno es un Excel: ábralo en Drive → *Archivo → Guardar como Hoja de cálculo de Google* y vuelva a ejecutar `configurar`.
+5. Ejecute **`sincronizarDrive`** (lee los consolidados) y por último **`instalarActivadorDiario`** (se actualiza solo todos los días a las 6 a. m.).
+
+## 3. Publicar la aplicación web
+**Implementar → Nueva implementación → Aplicación web**
+- Ejecutar como: **yo** (siau@miredips.org)
+- Quién tiene acceso: **cualquier persona de miredips.org** (la organización)
+
+Copie la URL `…/exec`: ese es el enlace del **visor**. El **administrador** es la misma URL con `?pagina=admin`.
+
+## 4. Quién puede entrar
+Por defecto, solo siau@miredips.org (administrador). Para agregar personas: **⚙ Configuración → Propiedades de la secuencia de comandos**:
+
+| Propiedad | Valor |
 |---|---|
-| `ADMIN_PASSWORD` | contraseña del administrador (larga) |
-| `VISOR_PASSWORD` | contraseña para ver el tablero (**obligatoria en la práctica**: muestra el desempeño de cada persona) |
-| `BOT_TOKEN` | clave compartida con el script y el monitor. Genérela: `openssl rand -hex 24` |
-| `SESSION_SECRET` | otra clave larga (así no se cierran las sesiones al reiniciar) |
-| `DATA_DIR` | `/data` (ya viene en el Dockerfile): **monte el disco persistente ahí** |
+| `ADMINS` | correos que administran, separados por coma |
+| `VISORES` | correos que solo consultan, separados por coma |
 
-Compruebe que `https://SU-DIRECCION/api/salud` responde `{"ok":true}`. **Respalde el disco**: allí quedan la base de datos y las fotos.
+Quien no esté en las listas ve «Sin acceso». Los cambios aplican de inmediato.
 
-## 2. Secretos del repositorio
-*Settings → Secrets and variables → Actions → New repository secret*: `PLATAFORMA_URL` (sin «/» final) y `BOT_TOKEN` (el mismo del servidor).
+## Al actualizar el código
+Pegue el nuevo `dist/Codigo.gs`, luego **Implementar → Administrar implementaciones → ✏ → Versión nueva**. La URL no cambia. Los datos no se tocan.
 
-## 3. Script de Google (iniciando sesión como siau@miredips.org)
-1. <https://script.google.com> → **Nuevo proyecto** → pegue el contenido de [`apps-script/EnlaceConsolidados.gs`](apps-script/EnlaceConsolidados.gs).
-2. ⚙ **Configuración del proyecto → Propiedades del script**: agregue solo `PLATAFORMA_URL` y `BOT_TOKEN`.
-3. Ejecute **`autoconfigurar`** (pide permisos la primera vez). Busca por nombre los archivos (`CONS_CHARLAS`, `CONS_BUZON`, NPS, evaluación médica, `ILSC`) y la carpeta «Horario … - SIAU». **Lea el registro**: cada línea debe decir `OK` y el nombre correcto; si dice `REVISAR`, confirme que eligió el archivo bueno; si dice `NO ENCONTRADO`, agregue esa propiedad a mano con el ID del archivo (la parte larga de su dirección).
-4. Ejecute **`probarEnlace`**: verifica la conexión (le dirá si la dirección o el `BOT_TOKEN` están mal) y sincroniza. Debe terminar sin errores.
-5. Ejecute **`instalarActivadorDiario`** (sincroniza todos los días a las 6:00 a. m.).
-
-Los archivos deben ser **Hojas de Google** (no `.xlsx`).
-
-## 4. Comprobar y dejar listo
-- *Actions → Monitor de consolidados → Run workflow*: debe quedar en verde y, si todo llegó, no abrir ningún issue.
-- En el tablero, *Cumplimiento* debe mostrar a los SIAU con sus metas.
-- *Administrador → Personal y rotación*: indique a qué sede corresponde cada **nombre sin reconocer**, asigne las sedes de quien el horario no trae (p. ej. quien está de vacaciones) y revise las **sedes sin SIAU**.
-- Cada mes, suba el nuevo «Horario <Mes> <año> - SIAU» a la misma carpeta (Hoja de Google).
+## Diagnóstico
+Ejecute **`diagnosticar`**: lista qué está configurado, cuántos activadores hay y la URL.
+Si el administrador muestra «No se pudo abrir», revise que la implementación sea «Ejecutar como yo» y que el usuario esté en `ADMINS`/`VISORES`.

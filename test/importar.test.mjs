@@ -1,9 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync, mkdtempSync } from "node:fs";
-import { spawn } from "node:child_process";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { readFileSync } from "node:fs";
+import { nuevoNucleo, falla } from "./ayuda.mjs";
 import { abrirLibro } from "../web/shared/xlsx.js";
 import { prepararLibro, detectar, soloColumnas, sinColumna, LISTA_BLANCA } from "../web/shared/preparar.js";
 
@@ -54,35 +52,21 @@ test("preparar: el horario sale sin la cédula del personal", () => {
 });
 
 // ── Punta a punta: de los .xlsx al tablero, pasando por la importación del administrador
-async function conServidor(fn) {
-  const dir = mkdtempSync(join(tmpdir(), "imp-"));
-  const puerto = 3600 + Math.floor(Math.random() * 90);
-  const p = spawn(process.execPath, ["server.mjs"], { cwd: new URL("..", import.meta.url), env: { ...process.env, PORT: String(puerto), DATA_DIR: dir, ADMIN_PASSWORD: "x", BOT_TOKEN: "tok" }, stdio: "ignore" });
-  const base = `http://localhost:${puerto}`;
-  try {
-    for (let i = 0; i < 50; i++) { try { await fetch(base + "/api/sesion"); break; } catch { await new Promise((r) => setTimeout(r, 100)); } }
-    await fn(base);
-  } finally { p.kill(); }
-}
-
-test("importación: exige sesión de administrador, no duplica al repetir y alimenta el tablero", async () => {
-  await conServidor(async (base) => {
-    const cuerpos = [];
-    for (const [f, nombre] of [["nps.xlsx", "NPS.xlsx"], ["charlas.xlsx", "CONS_CHARLAS_2026_3.xlsx"], ["buzon.xlsx", "CONS_BUZON_2026_1.xlsx"]]) cuerpos.push((await prepararLibro(await abrirLibro(fix(f)), nombre, AHORA)).cuerpo);
-    const post = (cuerpo, cookie) => fetch(base + "/api/admin/importar", { method: "POST", headers: { "content-type": "application/json", ...(cookie ? { cookie } : {}) }, body: JSON.stringify(cuerpo) });
-    assert.equal((await post(cuerpos[0])).status, 401);
-    const login = await fetch(base + "/api/login", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ password: "x" }) });
-    const cookie = login.headers.get("set-cookie").split(";")[0];
-    for (let vez = 0; vez < 2; vez++) {
-      const [nps, ch, bz] = await Promise.all(cuerpos.map(async (c) => (await post(c, cookie)).json()));
-      assert.deepEqual(nps.sedes_no_reconocidas, []); // «NUEVA VIDA», «P. PALMAS» y «LAS PALMAS» se reconocen
-      assert.equal(ch.anio, 2026);
-      assert.equal(bz.registros, 2 * 2);
-    }
-    const c = await (await fetch(base + "/api/cumplimiento?mes=2026-09&hoy=2026-09-30")).json();
-    assert.equal(c.consolidado.encuesta_sg, 4); // 4 respuestas, no 8: la segunda importación reemplazó a la primera
-    assert.equal(c.consolidado.charla, 300 + 7 + 30);
-    assert.equal(c.actas_consolidado.esperadas, 4);
-    assert.equal(c.actas_consolidado.entregadas, 2);
-  });
+test("importación: exige ser administrador, no duplica al repetir y alimenta el tablero", async () => {
+  const { api } = nuevoNucleo();
+  const cuerpos = [];
+  for (const [f, nombre] of [["nps.xlsx", "NPS.xlsx"], ["charlas.xlsx", "CONS_CHARLAS_2026_3.xlsx"], ["buzon.xlsx", "CONS_BUZON_2026_1.xlsx"]]) cuerpos.push((await prepararLibro(await abrirLibro(fix(f)), nombre, AHORA)).cuerpo);
+  await falla(() => api("POST", "/api/admin/importar", { rol: "visor", cuerpo: cuerpos[0] }), 403);
+  await falla(() => api("POST", "/api/admin/importar", { rol: "nadie", cuerpo: cuerpos[0] }), 403);
+  for (let vez = 0; vez < 2; vez++) {
+    const [nps, ch, bz] = cuerpos.map((c) => api("POST", "/api/admin/importar", { cuerpo: c }));
+    assert.deepEqual(nps.sedes_no_reconocidas, []); // «NUEVA VIDA», «P. PALMAS» y «LAS PALMAS» se reconocen
+    assert.equal(ch.anio, 2026);
+    assert.equal(bz.registros, 2 * 2);
+  }
+  const c = api("GET", "/api/cumplimiento", { rol: "visor", q: { mes: "2026-09", hoy: "2026-09-30" } });
+  assert.equal(c.consolidado.encuesta_sg, 4); // 4 respuestas, no 8: la segunda importación reemplazó a la primera
+  assert.equal(c.consolidado.charla, 300 + 7 + 30);
+  assert.equal(c.actas_consolidado.esperadas, 4);
+  assert.equal(c.actas_consolidado.entregadas, 2);
 });

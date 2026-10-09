@@ -1,10 +1,24 @@
-export async function api(ruta, opts = {}) {
-  const o = { credentials: "same-origin", ...opts };
-  if (o.json !== undefined) { o.method ??= "POST"; o.headers = { "content-type": "application/json" }; o.body = JSON.stringify(o.json); }
-  const r = await fetch(ruta, o);
-  const data = await r.json().catch(() => ({}));
-  if (!r.ok) throw Object.assign(new Error(data.error ?? `Error ${r.status}`), { status: r.status });
-  return data;
+/** Dirección donde viven los recursos de la interfaz (la define la página que sirve Apps Script). */
+export const RECURSOS = (window.PLATAFORMA?.base ?? "").replace(/\/+$/, "");
+export const recurso = (ruta) => RECURSOS + ruta;
+export const APP = window.PLATAFORMA?.app ?? "";
+
+/**
+ * Llama al servidor (Apps Script: google.script.run → función `llamar`). Misma forma que un fetch:
+ * api("/api/evidencias?mes=2026-09"), api(ruta, { json }) para POST, { method: "PUT" | "DELETE", json }.
+ */
+export function api(ruta, opts = {}) {
+  const [camino, qs = ""] = ruta.split("?");
+  const metodo = opts.method ?? (opts.json !== undefined ? "POST" : "GET");
+  const peticion = JSON.stringify({ metodo, ruta: camino, q: Object.fromEntries(new URLSearchParams(qs)), cuerpo: opts.json ?? {} });
+  return new Promise((ok, fallo) => {
+    const g = window.google?.script?.run;
+    if (!g) return fallo(new Error("Esta página solo funciona dentro de la plataforma (Apps Script)."));
+    g.withSuccessHandler((texto) => {
+      let r; try { r = JSON.parse(texto); } catch { return fallo(new Error("Respuesta inválida del servidor")); }
+      if (r.ok) ok(r.datos); else fallo(Object.assign(new Error(r.error), { status: r.estado }));
+    }).withFailureHandler((e) => fallo(new Error(e?.message ?? String(e)))).llamar(peticion);
+  });
 }
 
 /** Crea elementos sin innerHTML (evita XSS con texto de usuario). */
@@ -33,14 +47,14 @@ export function opciones(sel, lista, valor = "id", texto = "nombre", vacio = "To
 export function pintarMarca(marca, area = "siau") {
   const sep = () => h("span", { class: "sep" });
   document.getElementById("logos").replaceChildren(
-    h("img", { class: "mired", src: "/shared/marca/mired.png", alt: "MiRed IPS" }), sep(),
+    h("img", { class: "mired", src: recurso("/shared/marca/mired.png"), alt: "MiRed IPS" }), sep(),
     ...(area === "siau"
-      ? [h("img", { class: "calidad", src: "/shared/marca/calidad-azul.png", alt: "Gestión de la Calidad" }), sep(), h("img", { class: "principal", src: marca.logo_siau, alt: marca.nombre_siau })]
-      : [h("img", { class: "principal aso", src: marca.logo_asociacion, alt: marca.nombre_asociacion })]));
+      ? [h("img", { class: "calidad", src: recurso("/shared/marca/calidad-azul.png"), alt: "Gestión de la Calidad" }), sep(), h("img", { class: "principal", src: recurso("/shared/marca/siau-azul.png"), alt: marca.nombre_siau })]
+      : [h("img", { class: "principal aso", src: recurso("/shared/marca/asociacion.png"), alt: marca.nombre_asociacion })]));
 }
 
 /** Killo, la mascota de MiRed: pulgar, explica, atento, bienvenida, manos, celular, dardo, siau (megáfono). */
-export const mascota = (pose, alto) => h("img", { class: "mascota", src: `/shared/marca/killo-${pose}.webp`, alt: "", style: alto ? `height:${alto}px` : null });
+export const mascota = (pose, alto) => h("img", { class: "mascota", src: recurso(`/shared/marca/killo-${pose}.webp`), alt: "", style: alto ? `height:${alto}px` : null });
 
 /** Título grande estilo iOS: al salir de pantalla, el título pasa a la barra superior. */
 export function tituloGrande(kicker, titulo) {

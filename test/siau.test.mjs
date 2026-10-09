@@ -1,11 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
-import { mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { parsearBuzon, parsearCharlasMatriz, parsearEncuestas, parsearHorario, parsearIlsc, rechazarPersonales } from "../consolidados.mjs";
-import { calcularPorTecnico } from "../lib.mjs";
+import { parsearBuzon, parsearCharlasMatriz, parsearEncuestas, parsearHorario, parsearIlsc, rechazarPersonales } from "../nucleo/consolidados.mjs";
+import { calcularPorTecnico } from "../nucleo/lib.mjs";
+import { nuevoNucleo, falla } from "./ayuda.mjs";
 
 // ── Cuadrículas sintéticas con la MISMA forma que los archivos reales (nombres y datos inventados)
 const BUZON = {
@@ -165,45 +162,45 @@ test("cumplimiento individual: actas pendientes solo hasta hoy y solo de sus sed
   assert.deepEqual(a.pendientes.map((p) => p.codigo), ["B041"]);
 });
 
-// ── Punta a punta
-async function conServidor(fn) {
-  const dir = mkdtempSync(join(tmpdir(), "ev-"));
-  const puerto = 3800 + Math.floor(Math.random() * 90);
-  const p = spawn(process.execPath, ["server.mjs"], { cwd: new URL("..", import.meta.url), env: { ...process.env, PORT: String(puerto), DATA_DIR: dir, ADMIN_PASSWORD: "x", BOT_TOKEN: "tok" }, stdio: "ignore" });
-  const base = `http://localhost:${puerto}`;
-  try {
-    for (let i = 0; i < 50; i++) { try { await fetch(base + "/api/sesion"); break; } catch { await new Promise((r) => setTimeout(r, 100)); } }
-    await fn(base);
-  } finally { p.kill(); }
-}
-const enviar = (base, body) => fetch(base + "/api/bot/consolidados", { method: "POST", headers: { authorization: "Bearer tok", "content-type": "application/json" }, body: JSON.stringify(body) });
-
+// ── Punta a punta, con el núcleo completo
 test("punta a punta: horario + consolidados → cumplimiento individual; rechaza datos personales", async () => {
-  await conServidor(async (base) => {
-    const r1 = await (await enviar(base, { tipo: "horario", archivo_id: "H", archivo: "Horario", mes: "2026-09", hojas: horario() })).json();
-    assert.equal(r1.personal, 7);
-    assert.ok(r1.asignaciones >= 6);
-    assert.equal(r1.ausencias, 3);
-    await enviar(base, { tipo: "nps", archivo_id: "N", archivo: "NPS", hojas: { "Respuestas de formulario 1": nps(Array.from({ length: 4 }, (_, i) => [`0${i + 1}/09/2026 10:00:00`, "P. LAS PALMAS", "", "10"])) } });
-    const ch = await (await enviar(base, { tipo: "charlas_matriz", archivo_id: "C", archivo: "CONS_CHARLAS_2026_3", hojas: { "CHARLAS USUARIOS": [["x"], ["SEDES", "SEPTIEMBRE"], ["C. MURILLO", "500"]] } })).json();
-    assert.equal(ch.anio, 2026);
-    const bz = await (await enviar(base, { tipo: "buzon", archivo_id: "B", archivo: "CONS_BUZON", hojas: { "SEPTIEMBRE_2026": [["SEDES", "SEPTIEMBRE"], ["DIA", "04(B036)", "11(B037)"], ["C. MURILLO", "ENTREGADO", ""]] } })).json();
-    assert.equal(bz.registros, 2);
+  const { api, nucleo } = nuevoNucleo();
+  const r1 = nucleo.sincronizar({ tipo: "horario", archivo: "Horario", mes: "2026-09", hojas: horario() });
+  assert.equal(r1.personal, 7);
+  assert.ok(r1.asignaciones >= 6);
+  assert.equal(r1.ausencias, 3);
+  nucleo.sincronizar({ tipo: "nps", archivo: "NPS", hojas: { "Respuestas de formulario 1": nps(Array.from({ length: 4 }, (_, i) => [`0${i + 1}/09/2026 10:00:00`, "P. LAS PALMAS", "", "10"])) } });
+  const ch = nucleo.sincronizar({ tipo: "charlas_matriz", archivo: "CONS_CHARLAS_2026_3", hojas: { "CHARLAS USUARIOS": [["x"], ["SEDES", "SEPTIEMBRE"], ["C. MURILLO", "500"]] } });
+  assert.equal(ch.anio, 2026);
+  const bz = nucleo.sincronizar({ tipo: "buzon", archivo: "CONS_BUZON", hojas: { SEPTIEMBRE_2026: [["SEDES", "SEPTIEMBRE"], ["DIA", "04(B036)", "11(B037)"], ["C. MURILLO", "ENTREGADO", ""]] } });
+  assert.equal(bz.registros, 2);
 
-    const c = await (await fetch(base + "/api/cumplimiento?mes=2026-09&hoy=2026-09-30")).json();
-    const ana = c.siau.tecnicos.find((t) => t.nombre.startsWith("BEATRIZ"));
-    assert.equal(ana.encuestas.valor, 4); // «P. LAS PALMAS» llega como «P. Palmas» en su horario y como «LAS PALMAS» en el formulario
-    assert.equal(ana.charlas.valor, 500);
-    assert.equal(ana.actas.pendientes.length, 1);
-    const carla = c.siau.tecnicos.find((t) => t.nombre.startsWith("CARLA"));
-    assert.equal(carla.dias_activos, 17);
-    assert.equal(carla.encuestas.meta, 51); // 90 × 17/30
-    assert.equal(c.siau.tecnicos.some((t) => t.nombre.startsWith("ELSA") || t.nombre.startsWith("FANNY")), false);
-    assert.ok(c.siau.sin_cobertura.length > 30);
-    assert.equal(c.actas_consolidado.esperadas, 2);
+  const c = api("GET", "/api/cumplimiento", { q: { mes: "2026-09", hoy: "2026-09-30" } });
+  const bea = c.siau.tecnicos.find((t) => t.nombre.startsWith("BEATRIZ"));
+  assert.equal(bea.encuestas.valor, 4); // «P. LAS PALMAS» llega como «P. Palmas» en su horario y como «LAS PALMAS» en el formulario
+  assert.equal(bea.charlas.valor, 500);
+  assert.equal(bea.actas.pendientes.length, 1);
+  const carla = c.siau.tecnicos.find((t) => t.nombre.startsWith("CARLA"));
+  assert.equal(carla.dias_activos, 17);
+  assert.equal(carla.encuestas.meta, 51); // 90 × 17/30
+  assert.equal(c.siau.tecnicos.some((t) => t.nombre.startsWith("ELSA") || t.nombre.startsWith("FANNY")), false);
+  assert.ok(c.siau.sin_cobertura.length > 30);
+  assert.equal(c.actas_consolidado.esperadas, 2);
 
-    const malo = await enviar(base, { tipo: "nps", archivo_id: "N2", archivo: "NPS", hojas: { "Respuestas de formulario 1": [["Marca temporal", "CÉDULA", "SEDE QUE CONSULTÓ:", "probabilidad"], ["01/09/2026", "123", "X", "10"]] } });
-    assert.equal(malo.status, 400);
-    assert.match((await malo.json()).error, /datos personales/);
-  });
+  const malo = await falla(() => nucleo.sincronizar({ tipo: "nps", archivo: "NPS", hojas: { "Respuestas de formulario 1": [["Marca temporal", "CÉDULA", "SEDE QUE CONSULTÓ:", "probabilidad"], ["01/09/2026", "123", "X", "10"]] } }), 400);
+  assert.match(malo.message, /datos personales/);
+  await falla(() => nucleo.sincronizar({ tipo: "otro", archivo: "x", hojas: {} }), 400);
+});
+
+test("punta a punta: sincronizar de nuevo reemplaza (no duplica) y lo cargado a mano sobrevive al horario", () => {
+  const { api, nucleo } = nuevoNucleo();
+  nucleo.sincronizar({ tipo: "horario", archivo: "H", mes: "2026-09", hojas: horario() });
+  const bea = api("GET", "/api/admin/personal", { q: { mes: "2026-09" } }).tecnicos.find((t) => t.nombre.startsWith("GINA"));
+  const palmas = api("GET", "/api/config").sedes.find((s) => s.nombre === "P. UNIVERSAL");
+  api("POST", "/api/admin/asignaciones", { cuerpo: { tecnico_id: bea.id, sede_id: palmas.id, desde: "2026-09-01", hasta: "" } });
+  for (let i = 0; i < 2; i++) nucleo.sincronizar({ tipo: "horario", archivo: "H", mes: "2026-09", hojas: horario() });
+  const despues = api("GET", "/api/admin/personal", { q: { mes: "2026-09" } });
+  assert.equal(despues.tecnicos.filter((t) => t.nombre.startsWith("GINA")).length, 1);
+  assert.deepEqual(despues.tecnicos.find((t) => t.nombre.startsWith("GINA")).asignaciones.map((a) => [a.sede, a.origen]), [["P. UNIVERSAL", "manual"]]);
+  assert.equal(despues.tecnicos.find((t) => t.nombre.startsWith("BEATRIZ")).asignaciones.length, 2); // 2 sedes del horario, sin duplicar
 });

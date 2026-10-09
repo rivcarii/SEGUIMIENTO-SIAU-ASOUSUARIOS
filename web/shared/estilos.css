@@ -1,9 +1,9 @@
 /* SIAU · MiRed IPS — Liquid Glass (iOS 26/27) con estética de cuaderno de laboratorio.
    Marca: portafolio SIAU (Nunito, #065D7E, verde calidad, dorado medalla, rojo MiRed). */
-@font-face{font-family:Nunito;font-weight:400;font-display:swap;src:url(/shared/marca/fuentes/nunito-latin-400-normal.woff2) format("woff2")}
-@font-face{font-family:Nunito;font-weight:600;font-display:swap;src:url(/shared/marca/fuentes/nunito-latin-600-normal.woff2) format("woff2")}
-@font-face{font-family:Nunito;font-weight:800;font-display:swap;src:url(/shared/marca/fuentes/nunito-latin-800-normal.woff2) format("woff2")}
-@font-face{font-family:Nunito;font-weight:900;font-display:swap;src:url(/shared/marca/fuentes/nunito-latin-900-normal.woff2) format("woff2")}
+@font-face{font-family:Nunito;font-weight:400;font-display:swap;src:url(marca/fuentes/nunito-latin-400-normal.woff2) format("woff2")}
+@font-face{font-family:Nunito;font-weight:600;font-display:swap;src:url(marca/fuentes/nunito-latin-600-normal.woff2) format("woff2")}
+@font-face{font-family:Nunito;font-weight:800;font-display:swap;src:url(marca/fuentes/nunito-latin-800-normal.woff2) format("woff2")}
+@font-face{font-family:Nunito;font-weight:900;font-display:swap;src:url(marca/fuentes/nunito-latin-900-normal.woff2) format("woff2")}
 :root{color-scheme:light;--tx:#12323f;--mut:#566f7b;--bd:#d5e0e3;--azul:#006081;--pri:#065d7e;--pri2:#dcebf0;--osc:#043a4d;--verde:#006d32;--verde2:#009e4d;--oro:#e2b234;--rojo:#e20a31;--bad:#b3091f;
   --vidrio:rgba(255,255,255,.64);--vidrio-borde:rgba(255,255,255,.78);--sombra:0 1px 0 rgba(255,255,255,.95) inset,0 12px 32px rgba(4,58,77,.10),0 1px 2px rgba(4,58,77,.06);
   --ease-out:cubic-bezier(.23,1,.32,1);--ease-sheet:cubic-bezier(.32,.72,0,1);--fuente:Nunito,Arial,sans-serif;--mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace}
