@@ -1,0 +1,13 @@
+{
+  "name": "plataforma-evidencias",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Visor + administrador de evidencias (SIAU y Asociación de Usuarios) y bot verificador de Drive. Sin dependencias.",
+  "scripts": {
+    "start": "node server.mjs",
+    "verificar": "node bot/verificar.mjs",
+    "test": "node --test test/*.test.mjs"
+  },
+  "engines": { "node": ">=22.13" }
+}

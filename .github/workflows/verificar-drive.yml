@@ -1,0 +1,30 @@
+name: Verificar consolidados en Drive
+
+on:
+  schedule:
+    - cron: "0 13 * * 6" # sábados 8:00 a.m. Colombia: revisa la semana de actas (viernes)
+  workflow_dispatch:
+    inputs:
+      mes:
+        description: "Mes AAAA-MM (vacío = mes actual)"
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  verificar:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node bot/verificar.mjs ${{ inputs.mes }}
+        env:
+          PLATAFORMA_URL: ${{ secrets.PLATAFORMA_URL }}
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+          DRIVE_CARPETA_ACTAS: ${{ secrets.DRIVE_CARPETA_ACTAS }}
+          DRIVE_CARPETA_ENCUESTAS: ${{ secrets.DRIVE_CARPETA_ENCUESTAS }}
+          DRIVE_CARPETA_CHARLAS: ${{ secrets.DRIVE_CARPETA_CHARLAS }}
