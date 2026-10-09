@@ -999,20 +999,24 @@ function pagina_(plantilla, titulo) {
   return HtmlService.createHtmlOutput(html).setTitle(titulo).addMetaTag('viewport', 'width=device-width, initial-scale=1').setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
 }
 
-function sinAcceso_(email) {
+function sinAcceso_(email, motivo) {
+  var dueno = '';
+  try { dueno = String(Session.getEffectiveUser().getEmail() || ''); } catch (e) { dueno = ''; }
   var texto = email
     ? 'La cuenta ' + email + ' no tiene acceso a esta plataforma. Pida a un administrador que agregue su correo.'
-    : 'No se pudo identificar su cuenta. Abra el enlace iniciando sesión con su correo institucional.';
-  var esc = String(texto).replace(/&/g, '&amp;').replace(/</g, '&lt;');
+    : 'Google no entregó el correo de quien abre la página. Esto pasa cuando el dueño del script es de otro dominio (por ejemplo un Gmail personal) o cuando la implementación no es «Ejecutar como: yo». Cree el proyecto y la implementación desde siau@miredips.org.';
+  var det = 'Cuenta detectada: ' + (email || '(vacía)') + '\nDueño del script: ' + (dueno || '(vacío)') + '\nAdministradores configurados: ' + listaCorreos_('ADMINS').length + '\nVisores configurados: ' + listaCorreos_('VISORES').length + (motivo ? '\nMotivo: ' + motivo : '');
+  var esc = function (t) { return String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;'); };
   return HtmlService.createHtmlOutput('<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">' +
-    '<body style="font:16px/1.5 system-ui,sans-serif;max-width:32rem;margin:15vh auto;padding:0 1rem;color:#12315f"><h2>Sin acceso</h2><p>' + esc + '</p></body>').setTitle('Sin acceso');
+    '<body style="font:16px/1.5 system-ui,sans-serif;max-width:36rem;margin:10vh auto;padding:0 1rem;color:#12315f"><h2>Sin acceso</h2><p>' + esc(texto) + '</p>' +
+    '<pre style="background:#eef3f8;padding:12px;border-radius:8px;white-space:pre-wrap;font-size:13px">' + esc(det) + '</pre></body>').setTitle('Sin acceso');
 }
 
 function doGet(e) {
   var u = usuario_();
   if (!u.rol) return sinAcceso_(u.email);
   var admin = e && e.parameter && e.parameter.pagina === 'admin';
-  if (admin && u.rol !== 'admin') return sinAcceso_(u.email);
+  if (admin && u.rol !== 'admin') return sinAcceso_(u.email, 'esta página es solo para administradores');
   return pagina_(admin ? PLANTILLA_ADMIN : PLANTILLA_VISOR, admin ? 'Administrador · Evidencias SIAU' : 'Evidencias SIAU');
 }
 
