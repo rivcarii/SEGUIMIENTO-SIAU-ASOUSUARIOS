@@ -245,7 +245,7 @@ async function personal(cont) {
           h("button", { class: "btn", onclick: llamar(async () => { await api("/api/admin/ausencias", { json: { tecnico_id: t.id, tipo: tipo.value, desde: ad.value, hasta: ah.value, nota: nota.value } }); }) }, "Registrar ausencia")),
       ] : h("p", { class: "mut" }, t.rol === "interprete" ? "El intérprete atiende todas las sedes; se muestra en «Acompañamiento LSC», no en el cumplimiento por SIAU." : "No se evalúa: recopila la información de los SIAU."));
   };
-  cont.replaceChildren(msg, h("div", { class: "filters" }, h("label", { style: "margin:0" }, "Mes"), mes), h("p", { class: "mut" }, "El horario mensual carga automáticamente las sedes y las ausencias de cada SIAU. Lo que agregue aquí a mano no se borra al sincronizar; úselo para corregir rotaciones, coberturas, vacaciones y licencias. La meta de cada SIAU baja en proporción a sus días de ausencia."),
+  cont.replaceChildren(msg, h("div", { class: "filters" }, h("label", { style: "margin:0" }, "Mes"), mes), h("p", { class: "mut" }, "Las sedes de cada SIAU salen de la rotación base. Aquí registra vacaciones, licencias y coberturas del mes (la meta baja por los días ausentes). Úselo para corregir rotaciones, coberturas, vacaciones y licencias. La meta de cada SIAU baja en proporción a sus días de ausencia."),
     sinCob, sinRec, ...(d.tecnicos.length ? d.tecnicos.map(tarjeta) : [h("div", { class: "card vacio", style: "margin-top:14px" }, mascota("manos", 120), "Aún no hay personal. Se carga con el horario (script) o desde «Sedes y técnicos».")]));
 }
 

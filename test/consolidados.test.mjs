@@ -47,7 +47,8 @@ test("resolver: todas las variantes de sede vistas en los archivos reales apunta
     "PASO PALMAS": "P. LAS PALMAS", "P. PALMAS": "P. LAS PALMAS", "PASO FLORES": "P. LAS FLORES", "LA ESMERALDA LIPAYA": "P. ESMERALDA LIPAYA", "P. LA 21 MICHELLE": "P. LA 21",
     "CIUDADELA20DEJULIO": "C. CIUDADELA", "PASOLAVILLA": "P. LA VILLA", "CAMINO LA MANGA": "C. LA MANGA", "CAMINO NAZARETH": "C. NAZARETH", "NUEVA VIDA": "P. NUEVA VIDA",
     "CAMINOUNIVERSITARIODISTRITALADELITADECHA": "C. ADELITA DE CHAR", "Paso San Jose": "P. SAN JOSE", "P. Carlos Meisel": "P. CARLOS MEISEL", "B. ESPERANZA": "P. BUENA ESPERANZA", "SANTO DOMINGO": "P. SANTO DOMINGO",
+    "CARRIZAL I": "P. CARRIZAL", "LA UNION SAN JOSE": "P. SAN JOSE", "CENTRO NUTRICIONAL ROSOUR": "P. ROSOUR", "CENTRO DE RECUPERACIÓN ROSOUR 7": "P. ROSOUR", "SANTO DOMINGO DE AMÉRICA": "P. SANTO DOMINGO",
   };
   for (const [texto, esperado] of Object.entries(casos)) assert.equal(r(texto)?.nombre, esperado, texto);
-  for (const dudoso of ["HOSPITAL GENERAL DE BARRANQUILLA", "INTERPRETE", "TOTAL", "CARRIZAL I", "LA UNION SAN JOSE"]) assert.equal(r(dudoso), null, dudoso);
+  for (const dudoso of ["HOSPITAL GENERAL DE BARRANQUILLA", "INTERPRETE", "TOTAL"]) assert.equal(r(dudoso), null, dudoso);
 });

@@ -94,15 +94,35 @@ async function vistaCumplimiento(c) {
   const detalleSiau = S.siau && filas[0] ? h("div", { class: "card" }, h("div", { class: "mut" }, "Sedes que atiende este mes"),
     h("div", { class: "chips", style: "margin-top:8px" }, filas[0].sedes.length ? filas[0].sedes.map((x) => h("span", { class: "chip-sede", style: "background:rgba(6,93,126,.12);color:var(--azul)" }, x)) : h("span", { class: "mut" }, "Sin sedes asignadas")),
     filas[0].ausencias.length ? h("p", { class: "mut" }, "Ausencias: " + filas[0].ausencias.map((a) => `${a.tipo} (${fmtFecha(a.desde)} → ${fmtFecha(a.hasta)})`).join(" · ")) : "") : "";
-  const tabla = filas.length ? h("div", { class: "card scroll" }, h("table", { class: "cient" },
-    h("thead", {}, h("tr", {}, ["SIAU", "Días", "Encuestas", "Charlas", "NPS", "Actas"].map((t) => h("th", {}, t)))),
-    h("tbody", {}, filas.map((t) => h("tr", { class: t.ausente ? "ausente" : "" },
-      h("td", {}, h("div", { style: "font-weight:800" }, nombreCorto(t.nombre)), h("div", { class: "mut" }, t.sedes.length ? t.sedes.join(" · ") : "Sin sedes asignadas")),
-      h("td", { class: "num" }, t.ausente ? h("span", { class: "badge" }, t.ausencias[0]?.tipo ?? "ausente") : `${t.dias_activos}/${t.dias_mes}`, t.ausencias.length && !t.ausente ? h("div", { class: "mut" }, t.ausencias.map((a) => a.tipo).join(", ")) : ""),
-      h("td", {}, t.ausente ? "—" : medidor(t.encuestas)), h("td", {}, t.ausente ? "—" : medidor(t.charlas)),
-      h("td", { class: "num" }, t.nps == null ? "—" : String(t.nps)),
-      h("td", { class: "num", title: t.actas.pendientes.map((p) => `${p.sede} · ${p.codigo}`).join("\n") }, t.actas.esperadas ? `${t.actas.entregadas}/${t.actas.esperadas}` : "—", t.actas.pendientes.length ? h("div", { class: "mut" }, `${t.actas.pendientes.length} pendiente(s)`) : ""))))))
-    : h("div", { class: "card vacio" }, mascota("manos", 120), "Sin personal cargado: el horario se sincroniza con el script, o agréguelo en Administrador → Personal.");
+  // Encuestas por tipo: cuánto aporta cada una al total que se compara con la meta
+  const nNps = sum("encuestas", "nps"), nMed = sum("encuestas", "medica"), nTot = nNps + nMed;
+  const TIPOS_ENC = [["Satisfacción de usuarios (NPS)", nNps, true], ["Evaluación médico asistencial", nMed, true], ["Encuesta IAMI", null, false], ["Control prenatal", null, false]];
+  const porTipo = evaluados.length ? h("div", { class: "card" }, h("h3", { style: "margin:0 0 4px" }, "Encuestas por tipo"),
+    h("p", { class: "mut", style: "margin:0 0 10px" }, "Las encuestas de cada SIAU son la suma de los tipos con fuente en Drive."),
+    ...TIPOS_ENC.map(([nombre, n, hay]) => h("div", { class: "tipo-enc" + (hay ? "" : " sin-fuente") }, h("span", { class: "t" }, nombre),
+      h("span", { class: "n num" }, hay ? String(n) : "sin fuente aún"),
+      hay ? h("span", { class: "barra", role: "img", "aria-label": `${nTot ? Math.round((100 * n) / nTot) : 0}% del total` }, h("i", { style: `transform:scaleX(${nTot ? n / nTot : 0})` })) : ""))) : "";
+
+  // Una tarjeta por SIAU: lo más atrasado primero; quien está ausente al final
+  const avance = (t) => Math.min(pctDe(t.encuestas.valor, t.encuestas.meta), pctDe(t.charlas.valor, t.charlas.meta));
+  const estadoDe = (t) => t.ausente ? ["ausente", t.ausencias[0]?.tipo ?? "Ausente"] : t.encuestas.cumple !== false && t.charlas.cumple !== false ? ["cumple", "Cumple"] : avance(t) >= 60 ? ["camino", "En camino"] : ["atencion", "Atención"];
+  const barra = (etq, m, detalle) => { const p = pctDe(m.valor, m.meta); return h("div", { class: "fila-meta" },
+    h("div", { class: "et" }, h("span", {}, etq), h("b", { class: "num" }, m.meta == null ? String(m.valor) : `${m.valor} / ${m.meta}`)),
+    m.meta ? h("div", { class: "barra " + clase(p), role: "img", "aria-label": `${etq}: ${p}% de la meta` }, h("i", { style: `transform:scaleX(${p / 100})` })) : "",
+    detalle ? h("div", { class: "sub" }, detalle) : ""); };
+  const ordenadas = [...filas].sort((x, y) => (x.ausente - y.ausente) || (avance(x) - avance(y)) || x.nombre.localeCompare(y.nombre, "es"));
+  const tarjetaSiau = (t) => { const [cls, txt] = estadoDe(t); return h("article", { class: "siau-card " + cls },
+    h("header", {}, h("h3", {}, nombreCorto(t.nombre)), h("span", { class: "estado " + cls }, txt)),
+    h("div", { class: "chips" }, t.sedes.length ? t.sedes.map((x) => h("span", { class: "chip-sede suave" }, x)) : h("span", { class: "mut" }, "Sin sedes asignadas")),
+    t.ausente ? h("p", { class: "mut" }, t.ausencias.map((a) => `${a.tipo}: ${fmtFecha(a.desde)} → ${fmtFecha(a.hasta)}`).join(" · ")) : [
+      barra("Encuestas", t.encuestas, `NPS ${t.encuestas.nps} · Médica ${t.encuestas.medica}`),
+      barra("Charlas", t.charlas, t.charlas.meta == null ? "" : t.charlas.valor >= t.charlas.meta ? "Meta alcanzada" : `Faltan ${t.charlas.meta - t.charlas.valor}`),
+      h("dl", { class: "mini" },
+        h("div", {}, h("dt", {}, "Días"), h("dd", { class: "num" }, `${t.dias_activos}/${t.dias_mes}`)),
+        h("div", {}, h("dt", {}, "NPS"), h("dd", { class: "num" }, t.nps == null ? "—" : String(t.nps))),
+        h("div", { title: t.actas.pendientes.map((p) => `${p.sede} · ${p.codigo}`).join("\n") }, h("dt", {}, "Actas"), h("dd", { class: "num" }, t.actas.esperadas ? `${t.actas.entregadas}/${t.actas.esperadas}` : "—")))]); };
+  const tabla = filas.length ? h("div", { class: "siau-grid" }, ordenadas.map(tarjetaSiau))
+    : h("div", { class: "card vacio" }, mascota("manos", 120), "Sin personal cargado todavía.")
 
   const sinCob = d.siau.sin_cobertura.length ? h("div", { class: "card" }, h("div", { class: "mut", style: "margin-bottom:8px" }, `${d.siau.sin_cobertura.length} sede(s) este mes sin un SIAU que las atienda:`),
     h("div", { class: "chips" }, d.siau.sin_cobertura.map((x) => h("span", { class: "chip-sede", title: x.motivo }, x.sede)))) : "";
@@ -129,8 +149,8 @@ async function vistaCumplimiento(c) {
   const bot = hall.length ? h("div", { class: "msg err" }, h("b", {}, "Atención con los datos: "), hall.slice(0, 4).map((x) => h("div", {}, "• " + x.texto))) : "";
 
   c.replaceChildren(hero, h("div", { class: "filters" }, h("label", { style: "margin:0" }, "Periodo de observación"), mes, filtroSiau), ...avisos,
-    sec(1, S.siau ? "Cumplimiento de " + quien : "Cumplimiento global"), resumen, detalleSiau,
-    h("div", { style: "height:14px" }), sec(2, S.siau ? "Detalle" : "Cumplimiento por SIAU"), tabla, h("p", { class: "leyenda" }, h("b", {}, "Tabla 1."), " Metas mínimas por SIAU. Lo registrado en cada sede se reparte entre quienes la atienden; la meta baja en proporción a los días de vacaciones o licencia."),
+    sec(1, S.siau ? "Cumplimiento de " + quien : "Cumplimiento global"), resumen, ...(S.siau ? [] : [h("div", { style: "height:14px" }), porTipo]), detalleSiau,
+    h("div", { style: "height:14px" }), sec(2, S.siau ? "Detalle" : "Cumplimiento por SIAU"), tabla, h("p", { class: "leyenda" }, h("b", {}, "Fig. 1."), " Metas mínimas por SIAU. Lo registrado en cada sede se reparte entre quienes la atienden; la meta baja en proporción a los días de vacaciones o licencia."),
     ...(sinCob && !S.siau ? [sec(3, "Sedes sin cobertura"), sinCob] : []),
     sec(sinCob && !S.siau ? 4 : 3, "Actas de buzón"), actas, h("p", { class: "leyenda" }, h("b", {}, "Tabla 2."), " Actas de apertura de buzón vencidas y no entregadas."),
     sec(sinCob && !S.siau ? 5 : 4, "Acompañamiento LSC (intérprete)"), lsc, bot);

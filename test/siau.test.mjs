@@ -204,3 +204,14 @@ test("punta a punta: sincronizar de nuevo reemplaza (no duplica) y lo cargado a 
   assert.deepEqual(despues.tecnicos.find((t) => t.nombre.startsWith("GINA")).asignaciones.map((a) => [a.sede, a.origen]), [["P. UNIVERSAL", "manual"]]);
   assert.equal(despues.tecnicos.find((t) => t.nombre.startsWith("BEATRIZ")).asignaciones.length, 2); // 2 sedes del horario, sin duplicar
 });
+
+test("encuestas: el total de cada SIAU suma NPS y evaluación médica y deja el desglose por tipo", () => {
+  const d = base();
+  d.mensual = [M(1, "encuestas", 40), M(1, "medica_evaluaciones", 30), M(2, "encuestas", 10), M(2, "medica_evaluaciones", 20)];
+  const r = calcularPorTecnico(d);
+  const ana = fila(r, "Ana"); // sede 1 completa + la mitad de la sede 2
+  assert.equal(ana.encuestas.nps, 40 + 5);
+  assert.equal(ana.encuestas.medica, 30 + 10);
+  assert.equal(ana.encuestas.valor, 45 + 40);
+  assert.equal(ana.encuestas.valor, ana.encuestas.nps + ana.encuestas.medica);
+});

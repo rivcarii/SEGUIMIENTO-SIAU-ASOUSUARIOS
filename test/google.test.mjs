@@ -191,11 +191,11 @@ const archivosDrive = () => [
   { id: "hsep", nombre: "Horario Septiembre 2026 - SIAU", hojas: { "CUADRO DE TURNO": HORARIO }, edad: 7, padre: { id: "carpeta-h", nombre: "Horarios" } },
 ];
 
-test("autoconfigurar: reconoce cada consolidado por su nombre y la carpeta de horarios; no pisa lo manual", () => {
+test("autoconfigurar: reconoce cada consolidado por su nombre (sin horarios); no pisa lo manual", () => {
   const e = entorno({ archivos: archivosDrive(), props: { ID_BUZON: "manual" } });
   const informe = e.ctx.autoconfigurar();
   assert.equal(e.propiedades.ID_NPS, "nps");
-  assert.equal(e.propiedades.CARPETA_HORARIOS, "carpeta-h");
+  assert.equal(e.propiedades.CARPETA_HORARIOS, undefined); // los horarios ya no se leen
   assert.equal(e.propiedades.ID_BUZON, "manual");
   assert.ok(informe.some((l) => /ID_BUZON: ya configurado/.test(l)));
   assert.ok(informe.some((l) => /ID_MEDICA: NO ENCONTRADO/.test(l)));
@@ -209,7 +209,7 @@ test("sincronizarDrive: carga los consolidados SIN datos personales y avisa de l
   const guardado = JSON.stringify(base.getSheetByName("t_mensual").datos);
   assert.ok(guardado.includes("encuestas")); // se cargó el NPS
   for (const dato of ["ana@ejemplo", "Ana", "Paz", "123456", "3000000000", "99887766"]) assert.ok(!JSON.stringify([...base.hojas.values()].map((h) => h.datos)).includes(dato), dato);
-  assert.match(JSON.stringify(base.getSheetByName("t_tecnicos").datos), /PERSONA UNO/); // el nombre del personal sí se guarda (cuadro de turnos); la cédula no
+  assert.ok(!JSON.stringify([...base.hojas.values()].map((h) => h.datos)).includes("PERSONA UNO")); // los horarios no se leen
   assert.ok(e.logs.join("\n").includes("ERROR · ID_CHARLAS"));
 });
 

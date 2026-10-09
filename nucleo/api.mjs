@@ -6,7 +6,7 @@ import { calcularCumplimiento, calcularPorTecnico, fechaValida, mesValido } from
 import { analizar } from "./analisis.mjs";
 import { mismaPersona, sedesPorPersona } from "./rotacion.mjs";
 
-export const VERSION_DATOS = 2;
+export const VERSION_DATOS = 3;
 export class ErrorHttp extends Error { constructor(estado, mensaje) { super(mensaje); this.estado = estado; } }
 const bad = (m) => new ErrorHttp(400, m);
 
@@ -130,7 +130,7 @@ export function crearNucleo({ almacen, fotos, hoy = () => new Date().toLocaleDat
     });
     const suma = (ind) => mensual.filter((m) => ind.includes(m.indicador)).reduce((t, m) => t + m.valor, 0);
     const hay = (ind) => mensual.some((m) => ind.includes(m.indicador));
-    r.consolidado = { charla: hay(["charlas_usuarios", "charlas_funcionarios"]) ? suma(["charlas_usuarios", "charlas_funcionarios"]) : null, encuesta_sg: hay(["encuestas"]) ? suma(["encuestas"]) : null };
+    r.consolidado = { charla: hay(["charlas_usuarios", "charlas_funcionarios"]) ? suma(["charlas_usuarios", "charlas_funcionarios"]) : null, encuesta_sg: hay(["encuestas"]) ? suma(["encuestas"]) : null, encuesta_ma: hay(["medica_evaluaciones"]) ? suma(["medica_evaluaciones"]) : null };
 
     const nombre = new Map(sedes.map((x) => [x.id, x.nombre]));
     const vencidas = actas.filter((a) => a.fecha <= dia);

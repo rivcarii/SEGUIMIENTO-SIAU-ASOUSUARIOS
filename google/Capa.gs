@@ -6,7 +6,6 @@
 var ZONA = 'America/Bogota';
 // Dónde están alojados los estilos, scripts e imágenes de la interfaz (GitHub Pages del repositorio).
 var RECURSOS_POR_DEFECTO = 'https://rivcarii.github.io/SEGUIMIENTO-SIAU-ASOUSUARIOS';
-var MESES_ES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
 
 function propiedades_() { return PropertiesService.getScriptProperties(); }
 function hoyBogota_() { return Utilities.formatDate(new Date(), ZONA, 'yyyy-MM-dd'); }
@@ -286,7 +285,7 @@ var LISTA_BLANCA = {
   ilscActividades: [function (n) { return n.indexOf('fecha de la atencion') === 0; }, function (n) { return n === 'tematica'; }, function (n) { return n === 'sede'; }, function (n) { return n.indexOf('asistentes') >= 0; }],
 };
 
-/** Vacía la columna «CEDULA» del horario (la plataforma no la necesita y no debe guardarla). */
+/** Vacía la columna «CEDULA» (por si algún archivo la trae; la plataforma no la necesita y no debe guardarla). */
 function sinCedula_(grid) {
   if (!grid) return grid;
   var h = grid.findIndex(function (f) { return f.some(function (c) { return norm_(c) === 'cedula'; }); });
@@ -338,13 +337,6 @@ function autoconfigurar() {
     props.setProperty(b[0], c[0].getId());
     informe.push(b[0] + ': ' + (c.length === 1 ? 'OK' : 'REVISAR (' + c.length + ' candidatos; se eligió el más reciente)') + ' · «' + c[0].getName() + '»');
   });
-  if (actuales.CARPETA_HORARIOS) informe.push('CARPETA_HORARIOS: ya configurado');
-  else {
-    var h = candidatos_("title contains 'Horario'", function (n) { return /^horario/.test(n) && n.indexOf('siau') >= 0; });
-    var padre = h.length ? h[0].getParents() : null;
-    if (padre && padre.hasNext()) { var c2 = padre.next(); props.setProperty('CARPETA_HORARIOS', c2.getId()); informe.push('CARPETA_HORARIOS: OK · carpeta «' + c2.getName() + '» (por «' + h[0].getName() + '»)'); }
-    else informe.push('CARPETA_HORARIOS: NO ENCONTRADA (suba un «Horario <Mes> <año> - SIAU» como Hoja de Google)');
-  }
   return informe;
 }
 
@@ -395,25 +387,6 @@ function sincronizarDriveCon_(nucleo) {
     } catch (e) { errores.push(t[0] + ': ' + e.message); }
   });
 
-  // Horario del mes: el archivo «Horario <Mes> <año> …» más reciente de la carpeta (sedes, rotación, vacaciones y licencias)
-  if (p.CARPETA_HORARIOS) {
-    try {
-      var it = DriveApp.getFolderById(p.CARPETA_HORARIOS).getFilesByType(MimeType.GOOGLE_SHEETS);
-      var elegido = null;
-      while (it.hasNext()) { var f = it.next(); if (/^horario/i.test(f.getName()) && (!elegido || f.getLastUpdated() > elegido.getLastUpdated())) elegido = f; }
-      if (!elegido) throw new Error('no hay ningún «Horario …» en la carpeta');
-      var n = norm_(elegido.getName());
-      var mi = MESES_ES.findIndex(function (m) { return n.indexOf(m) >= 0; });
-      var anioArchivo = (n.match(/20\d\d/) || [String(anio)])[0];
-      var l = SpreadsheetApp.openById(elegido.getId());
-      cargar('horario', {
-        tipo: 'horario', archivo: elegido.getName(),
-        mes: mi >= 0 ? anioArchivo + '-' + ('0' + (mi + 1)).slice(-2) : undefined,
-        hojas: { 'CUADRO DE TURNO': sinCedula_(valores_(l, 'CUADRO DE TURNO')), 'HORARIO PASOS': valores_(l, 'HORARIO PASOS') },
-      });
-    } catch (e) { errores.push('CARPETA_HORARIOS: ' + e.message); }
-  } else errores.push('CARPETA_HORARIOS: no está configurada (ejecute «autoconfigurar»)');
-
   return { informe: informe, errores: errores };
 }
 
@@ -444,7 +417,7 @@ function instalarActivadorDiario() {
 function diagnosticar() {
   exigirAdminOEditor_();
   var p = propiedades_().getProperties(), s = [];
-  ['ID_BASE', 'ID_FOTOS', 'ID_CHARLAS', 'ID_BUZON', 'ID_NPS', 'ID_MEDICA', 'ID_ILSC', 'CARPETA_HORARIOS'].forEach(function (k) { s.push(k + ': ' + (p[k] ? 'configurado' : 'FALTA')); });
+  ['ID_BASE', 'ID_FOTOS', 'ID_CHARLAS', 'ID_BUZON', 'ID_NPS', 'ID_MEDICA', 'ID_ILSC'].forEach(function (k) { s.push(k + ': ' + (p[k] ? 'configurado' : 'FALTA')); });
   s.push('ADMINS: ' + listaCorreos_('ADMINS').length + ' correo(s) · VISORES: ' + listaCorreos_('VISORES').length + ' correo(s)');
   s.push('Recursos de la interfaz: ' + (p.RECURSOS || RECURSOS_POR_DEFECTO));
   s.push('Activadores: ' + ScriptApp.getProjectTriggers().length);

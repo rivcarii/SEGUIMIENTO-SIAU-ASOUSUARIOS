@@ -50,6 +50,7 @@ const ultimoDia = (mes) => new Date(Number(mes.slice(0, 4)), Number(mes.slice(5)
  * Cumplimiento individual de cada SIAU en un mes.
  * - Las sedes de cada SIAU salen de sus asignaciones vigentes en el mes.
  * - Lo que registra una sede se reparte en partes iguales entre los SIAU que la atienden ese mes y no están ausentes todo el mes.
+ * - Las encuestas son la suma de las de satisfacción (NPS) y las de evaluación médico asistencial; el desglose va en encuestas.nps / encuestas.medica.
  * - La meta mínima se ajusta por los días de vacaciones/licencia dentro del mes (meta × días presentes / días del mes).
  */
 export function calcularPorTecnico({ mes, hoy, tecnicos, asignaciones, ausencias, sedes, mensual, actas, metas }) {
@@ -72,17 +73,17 @@ export function calcularPorTecnico({ mes, hoy, tecnicos, asignaciones, ausencias
 
   const filas = activos.map((t) => {
     const f = factor.get(t.id), mis = sedesDe(t.id);
-    const acc = { encuestas: 0, charlas: 0, p: 0, m: 0, d: 0 };
+    const acc = { nps: 0, medica: 0, charlas: 0, p: 0, m: 0, d: 0 };
     if (f > 0) {
       for (const sid of mis) {
         const w = 1 / (responsables.get(sid)?.length || 1);
-        acc.encuestas += w * valor(sid, "encuestas");
+        acc.nps += w * valor(sid, "encuestas"); acc.medica += w * valor(sid, "medica_evaluaciones");
         acc.charlas += w * (valor(sid, "charlas_usuarios") + valor(sid, "charlas_funcionarios"));
         acc.p += w * valor(sid, "nps_promotores"); acc.m += w * valor(sid, "nps_pasivos"); acc.d += w * valor(sid, "nps_detractores");
       }
     }
     const metaEnc = metas.encuestas == null ? null : Math.round(metas.encuestas * f), metaCh = metas.charlas == null ? null : Math.round(metas.charlas * f);
-    const enc = Math.round(acc.encuestas), ch = Math.round(acc.charlas), n = acc.p + acc.m + acc.d;
+    const encNps = Math.round(acc.nps), encMed = Math.round(acc.medica), enc = encNps + encMed, ch = Math.round(acc.charlas), n = acc.p + acc.m + acc.d;
     const pend = [];
     let esperadas = 0, entregadas = 0;
     for (const sid of mis) for (const a of actas.filter((x) => x.sede_id === sid && x.fecha.startsWith(mes) && x.fecha <= hoy)) {
@@ -93,7 +94,7 @@ export function calcularPorTecnico({ mes, hoy, tecnicos, asignaciones, ausencias
     return {
       tecnico_id: t.id, nombre: t.nombre, sedes: mis.map((id) => nombreSede.get(id)).filter(Boolean).sort(),
       dias_activos: Math.round(f * D), dias_mes: D, ausente: f === 0, ausencias: ausenciasMes,
-      encuestas: { valor: enc, meta: metaEnc, cumple: metaEnc == null ? null : enc >= metaEnc },
+      encuestas: { valor: enc, meta: metaEnc, cumple: metaEnc == null ? null : enc >= metaEnc, nps: encNps, medica: encMed },
       charlas: { valor: ch, meta: metaCh, cumple: metaCh == null ? null : ch >= metaCh },
       nps: n ? Math.round((1000 * (acc.p - acc.d)) / n) / 10 : null,
       actas: { esperadas, entregadas, pendientes: pend },

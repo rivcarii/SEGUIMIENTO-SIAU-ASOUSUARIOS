@@ -3,8 +3,8 @@
 Aplicación web de **Google Apps Script** (sin servidores ni claves):
 
 - **Visor**: cumplimiento individual de cada SIAU en las 40 sedes (90 encuestas y 200 charlas mínimas al mes, actas de buzón, acompañamiento LSC) y galería de fotos de evidencia (SIAU y Asociación de Usuarios). Ludoteca: en construcción.
-- **Administrador**: cargar evidencias con fotos, personal y rotación (sedes por SIAU, vacaciones y licencias; la meta baja en proporción a los días presentes), metas, nombres de sede y la actualización de los consolidados.
-- **Consolidados**: el script lee solos, desde el Drive de siau@miredips.org, charlas, buzón, NPS, evaluación médica, registro del intérprete y el horario del mes (a diario, 6 a. m.).
+- **Administrador**: cargar evidencias con fotos, personal y rotación (la rotación base de los 15 SIAU viene cargada; sedes por SIAU, vacaciones y licencias; la meta baja en proporción a los días presentes), metas, nombres de sede y la actualización de los consolidados.
+- **Consolidados**: el script lee solos, desde el Drive de siau@miredips.org, charlas, buzón, NPS, evaluación médica y registro del intérprete (a diario, 6 a. m.).
 
 Instalación: **[INSTALAR.md](INSTALAR.md)**.
 

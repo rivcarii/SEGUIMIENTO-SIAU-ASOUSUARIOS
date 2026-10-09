@@ -1,6 +1,5 @@
 // Reglas del monitor. Puras (sin red) para poder probarlas. Nada de lo que produce incluye nombres de personas.
 export const REQUERIDAS = {
-  horario: "Horario del personal",
   charlas_matriz: "Consolidado de charlas",
   buzon: "Consolidado de buzón",
   nps: "Encuestas NPS",
@@ -23,8 +22,6 @@ export function analizar(e, ahora = Date.now()) {
     if (f.sedes_no_reconocidas.length) agregar("medio", `${nombre}: ${f.sedes_no_reconocidas.length} nombre(s) de sede sin reconocer (${lista(f.sedes_no_reconocidas)}). Indíquelos en Administrador → Personal y rotación.`);
     if (f.registros === 0) agregar("medio", `${nombre}: la última sincronización no trajo registros.`);
   }
-  const horario = e.fuentes.find((x) => x.tipo === "horario");
-  if (horario?.mes && horario.mes !== e.mes) agregar("medio", `El horario cargado es de ${horario.mes}, no de ${e.mes}: suba el horario del mes a la carpeta de horarios.`);
   if (e.personal.sin_cobertura.length) agregar("medio", `${e.personal.sin_cobertura.length} sede(s) sin SIAU este mes: ${lista(e.personal.sin_cobertura)}.`);
 
   // Ritmo: a mitad de mes un SIAU debería llevar ~la mitad de la meta. Solo cuentas, sin nombres.

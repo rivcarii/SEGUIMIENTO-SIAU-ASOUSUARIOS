@@ -167,3 +167,25 @@ tr.ausente td{opacity:.55}
 .chip-sede{display:inline-flex;align-items:center;gap:6px}
 .chip-sede .btn{padding:0 7px;min-height:0;line-height:1.5;font-size:15px;box-shadow:none;background:transparent}
 .chip-sede{white-space:nowrap}
+
+/* Cumplimiento: una tarjeta por SIAU */
+.siau-grid{display:grid;gap:14px;grid-template-columns:repeat(auto-fill,minmax(300px,1fr))}
+.siau-card{background:var(--vidrio,rgba(255,255,255,.72));border:1px solid var(--vidrio-borde,rgba(255,255,255,.9));border-radius:22px;padding:16px 18px;box-shadow:var(--sombra);-webkit-backdrop-filter:blur(22px);backdrop-filter:blur(22px);display:flex;flex-direction:column;gap:12px;border-top:4px solid var(--verde2)}
+.siau-card.camino{border-top-color:var(--oro)}.siau-card.atencion{border-top-color:var(--rojo)}.siau-card.ausente{border-top-color:#9aa9b0;opacity:.85}
+.siau-card header{display:flex;justify-content:space-between;gap:10px;align-items:center}
+.siau-card h3{margin:0;font-size:18px;color:var(--azul)}
+.estado{font-size:12px;font-weight:800;border-radius:999px;padding:3px 12px;white-space:nowrap;text-transform:capitalize;background:rgba(0,152,90,.14);color:#006b3f}
+.estado.camino{background:rgba(185,138,0,.16);color:#7a5a00}.estado.atencion{background:rgba(226,10,49,.12);color:#a00a22}.estado.ausente{background:rgba(6,93,126,.1);color:var(--azul)}
+.chip-sede.suave{background:rgba(6,93,126,.1);color:var(--azul);font-size:12px;padding:1px 9px}
+.fila-meta .et{display:flex;justify-content:space-between;align-items:baseline;font-weight:700}
+.fila-meta .et b{font-size:20px;color:var(--azul)}
+.fila-meta .sub{margin-top:4px;font:600 12px var(--mono);color:var(--mut)}
+.barra{display:block;position:relative;height:14px;margin-top:6px;border-radius:99px;background:rgba(6,93,126,.12);overflow:hidden}
+.barra i{position:absolute;inset:0;transform-origin:left;background:linear-gradient(90deg,var(--verde),var(--verde2));border-radius:inherit;transition:transform 520ms var(--ease-out)}
+.barra.mid i{background:linear-gradient(90deg,#b8860b,var(--oro))}.barra.low i{background:linear-gradient(90deg,#b3091f,var(--rojo))}
+@starting-style{.barra i{transform:scaleX(0)}}
+.mini{display:flex;gap:8px;margin:0;padding-top:10px;border-top:1px solid rgba(6,93,126,.12)}
+.mini>div{flex:1;text-align:center}.mini dt{font-size:12px;color:var(--mut)}.mini dd{margin:0;font-weight:800;font-size:16px;color:var(--tx)}
+.tipo-enc{display:grid;grid-template-columns:1fr auto;gap:2px 12px;align-items:center;padding:8px 0;border-top:1px solid rgba(6,93,126,.1)}
+.tipo-enc .t{font-weight:700}.tipo-enc .n{font-weight:900;color:var(--azul)}.tipo-enc .barra{grid-column:1/-1;height:8px;margin-top:2px}
+.tipo-enc.sin-fuente{opacity:.6}.tipo-enc.sin-fuente .n{font-weight:600;color:var(--mut);font-size:13px}

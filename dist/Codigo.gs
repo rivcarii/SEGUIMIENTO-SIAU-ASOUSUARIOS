@@ -64,6 +64,10 @@ const ALIAS_EXTRA = {
   "P. BUENA ESPERANZA": ["B. ESPERANZA"],
   "P. ESMERALDA LIPAYA": ["LA ESMERALDA LIPAYA", "ESMERALDA"],
   "P. LA 21": ["P. LA 21 MICHELLE"],
+  "P. SAN JOSE": ["LA UNION SAN JOSE", "LA UNION"],
+  "P. ROSOUR": ["CENTRO DE RECUPERACION ROSOUR 7", "CENTRO NUTRICIONAL ROSOUR", "ROSOUR 7", "CENTRO NUTRICIONAL"],
+  "P. CARRIZAL": ["CARRIZAL I", "CARRIZAL 1"],
+  "P. SANTO DOMINGO": ["SANTO DOMINGO DE AMERICA", "SANTO DOMINGO DE AMÉRICA"],
 };
 
 /** Alias de una sede del catálogo: nombre largo del MAESTRO + variantes conocidas. */
@@ -165,6 +169,7 @@ const ultimoDia = (mes) => new Date(Number(mes.slice(0, 4)), Number(mes.slice(5)
  * Cumplimiento individual de cada SIAU en un mes.
  * - Las sedes de cada SIAU salen de sus asignaciones vigentes en el mes.
  * - Lo que registra una sede se reparte en partes iguales entre los SIAU que la atienden ese mes y no están ausentes todo el mes.
+ * - Las encuestas son la suma de las de satisfacción (NPS) y las de evaluación médico asistencial; el desglose va en encuestas.nps / encuestas.medica.
  * - La meta mínima se ajusta por los días de vacaciones/licencia dentro del mes (meta × días presentes / días del mes).
  */
 function calcularPorTecnico({ mes, hoy, tecnicos, asignaciones, ausencias, sedes, mensual, actas, metas }) {
@@ -187,17 +192,17 @@ function calcularPorTecnico({ mes, hoy, tecnicos, asignaciones, ausencias, sedes
 
   const filas = activos.map((t) => {
     const f = factor.get(t.id), mis = sedesDe(t.id);
-    const acc = { encuestas: 0, charlas: 0, p: 0, m: 0, d: 0 };
+    const acc = { nps: 0, medica: 0, charlas: 0, p: 0, m: 0, d: 0 };
     if (f > 0) {
       for (const sid of mis) {
         const w = 1 / (responsables.get(sid)?.length || 1);
-        acc.encuestas += w * valor(sid, "encuestas");
+        acc.nps += w * valor(sid, "encuestas"); acc.medica += w * valor(sid, "medica_evaluaciones");
         acc.charlas += w * (valor(sid, "charlas_usuarios") + valor(sid, "charlas_funcionarios"));
         acc.p += w * valor(sid, "nps_promotores"); acc.m += w * valor(sid, "nps_pasivos"); acc.d += w * valor(sid, "nps_detractores");
       }
     }
     const metaEnc = metas.encuestas == null ? null : Math.round(metas.encuestas * f), metaCh = metas.charlas == null ? null : Math.round(metas.charlas * f);
-    const enc = Math.round(acc.encuestas), ch = Math.round(acc.charlas), n = acc.p + acc.m + acc.d;
+    const encNps = Math.round(acc.nps), encMed = Math.round(acc.medica), enc = encNps + encMed, ch = Math.round(acc.charlas), n = acc.p + acc.m + acc.d;
     const pend = [];
     let esperadas = 0, entregadas = 0;
     for (const sid of mis) for (const a of actas.filter((x) => x.sede_id === sid && x.fecha.startsWith(mes) && x.fecha <= hoy)) {
@@ -208,7 +213,7 @@ function calcularPorTecnico({ mes, hoy, tecnicos, asignaciones, ausencias, sedes
     return {
       tecnico_id: t.id, nombre: t.nombre, sedes: mis.map((id) => nombreSede.get(id)).filter(Boolean).sort(),
       dias_activos: Math.round(f * D), dias_mes: D, ausente: f === 0, ausencias: ausenciasMes,
-      encuestas: { valor: enc, meta: metaEnc, cumple: metaEnc == null ? null : enc >= metaEnc },
+      encuestas: { valor: enc, meta: metaEnc, cumple: metaEnc == null ? null : enc >= metaEnc, nps: encNps, medica: encMed },
       charlas: { valor: ch, meta: metaCh, cumple: metaCh == null ? null : ch >= metaCh },
       nps: n ? Math.round((1000 * (acc.p - acc.d)) / n) / 10 : null,
       actas: { esperadas, entregadas, pendientes: pend },
@@ -428,7 +433,6 @@ return { entero, fecha, rechazarPersonales, parsearBuzon, parsearCharlasMatriz, 
 const M_analisis = (() => {
 // Reglas del monitor. Puras (sin red) para poder probarlas. Nada de lo que produce incluye nombres de personas.
 const REQUERIDAS = {
-  horario: "Horario del personal",
   charlas_matriz: "Consolidado de charlas",
   buzon: "Consolidado de buzón",
   nps: "Encuestas NPS",
@@ -451,8 +455,6 @@ function analizar(e, ahora = Date.now()) {
     if (f.sedes_no_reconocidas.length) agregar("medio", `${nombre}: ${f.sedes_no_reconocidas.length} nombre(s) de sede sin reconocer (${lista(f.sedes_no_reconocidas)}). Indíquelos en Administrador → Personal y rotación.`);
     if (f.registros === 0) agregar("medio", `${nombre}: la última sincronización no trajo registros.`);
   }
-  const horario = e.fuentes.find((x) => x.tipo === "horario");
-  if (horario?.mes && horario.mes !== e.mes) agregar("medio", `El horario cargado es de ${horario.mes}, no de ${e.mes}: suba el horario del mes a la carpeta de horarios.`);
   if (e.personal.sin_cobertura.length) agregar("medio", `${e.personal.sin_cobertura.length} sede(s) sin SIAU este mes: ${lista(e.personal.sin_cobertura)}.`);
 
   // Ritmo: a mitad de mes un SIAU debería llevar ~la mitad de la meta. Solo cuentas, sin nombres.
@@ -524,7 +526,7 @@ const { calcularCumplimiento, calcularPorTecnico, fechaValida, mesValido } = M_l
 const { analizar } = M_analisis;
 const { mismaPersona, sedesPorPersona } = M_rotacion;
 
-const VERSION_DATOS = 2;
+const VERSION_DATOS = 3;
 class ErrorHttp extends Error { constructor(estado, mensaje) { super(mensaje); this.estado = estado; } }
 const bad = (m) => new ErrorHttp(400, m);
 
@@ -648,7 +650,7 @@ function crearNucleo({ almacen, fotos, hoy = () => new Date().toLocaleDateString
     });
     const suma = (ind) => mensual.filter((m) => ind.includes(m.indicador)).reduce((t, m) => t + m.valor, 0);
     const hay = (ind) => mensual.some((m) => ind.includes(m.indicador));
-    r.consolidado = { charla: hay(["charlas_usuarios", "charlas_funcionarios"]) ? suma(["charlas_usuarios", "charlas_funcionarios"]) : null, encuesta_sg: hay(["encuestas"]) ? suma(["encuestas"]) : null };
+    r.consolidado = { charla: hay(["charlas_usuarios", "charlas_funcionarios"]) ? suma(["charlas_usuarios", "charlas_funcionarios"]) : null, encuesta_sg: hay(["encuestas"]) ? suma(["encuestas"]) : null, encuesta_ma: hay(["medica_evaluaciones"]) ? suma(["medica_evaluaciones"]) : null };
 
     const nombre = new Map(sedes.map((x) => [x.id, x.nombre]));
     const vencidas = actas.filter((a) => a.fecha <= dia);
@@ -888,7 +890,6 @@ const PLANTILLA_ADMIN = "<!doctype html>\n<html lang=\"es\"><head><meta charset=
 var ZONA = 'America/Bogota';
 // Dónde están alojados los estilos, scripts e imágenes de la interfaz (GitHub Pages del repositorio).
 var RECURSOS_POR_DEFECTO = 'https://rivcarii.github.io/SEGUIMIENTO-SIAU-ASOUSUARIOS';
-var MESES_ES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
 
 function propiedades_() { return PropertiesService.getScriptProperties(); }
 function hoyBogota_() { return Utilities.formatDate(new Date(), ZONA, 'yyyy-MM-dd'); }
@@ -1168,7 +1169,7 @@ var LISTA_BLANCA = {
   ilscActividades: [function (n) { return n.indexOf('fecha de la atencion') === 0; }, function (n) { return n === 'tematica'; }, function (n) { return n === 'sede'; }, function (n) { return n.indexOf('asistentes') >= 0; }],
 };
 
-/** Vacía la columna «CEDULA» del horario (la plataforma no la necesita y no debe guardarla). */
+/** Vacía la columna «CEDULA» (por si algún archivo la trae; la plataforma no la necesita y no debe guardarla). */
 function sinCedula_(grid) {
   if (!grid) return grid;
   var h = grid.findIndex(function (f) { return f.some(function (c) { return norm_(c) === 'cedula'; }); });
@@ -1220,13 +1221,6 @@ function autoconfigurar() {
     props.setProperty(b[0], c[0].getId());
     informe.push(b[0] + ': ' + (c.length === 1 ? 'OK' : 'REVISAR (' + c.length + ' candidatos; se eligió el más reciente)') + ' · «' + c[0].getName() + '»');
   });
-  if (actuales.CARPETA_HORARIOS) informe.push('CARPETA_HORARIOS: ya configurado');
-  else {
-    var h = candidatos_("title contains 'Horario'", function (n) { return /^horario/.test(n) && n.indexOf('siau') >= 0; });
-    var padre = h.length ? h[0].getParents() : null;
-    if (padre && padre.hasNext()) { var c2 = padre.next(); props.setProperty('CARPETA_HORARIOS', c2.getId()); informe.push('CARPETA_HORARIOS: OK · carpeta «' + c2.getName() + '» (por «' + h[0].getName() + '»)'); }
-    else informe.push('CARPETA_HORARIOS: NO ENCONTRADA (suba un «Horario <Mes> <año> - SIAU» como Hoja de Google)');
-  }
   return informe;
 }
 
@@ -1277,25 +1271,6 @@ function sincronizarDriveCon_(nucleo) {
     } catch (e) { errores.push(t[0] + ': ' + e.message); }
   });
 
-  // Horario del mes: el archivo «Horario <Mes> <año> …» más reciente de la carpeta (sedes, rotación, vacaciones y licencias)
-  if (p.CARPETA_HORARIOS) {
-    try {
-      var it = DriveApp.getFolderById(p.CARPETA_HORARIOS).getFilesByType(MimeType.GOOGLE_SHEETS);
-      var elegido = null;
-      while (it.hasNext()) { var f = it.next(); if (/^horario/i.test(f.getName()) && (!elegido || f.getLastUpdated() > elegido.getLastUpdated())) elegido = f; }
-      if (!elegido) throw new Error('no hay ningún «Horario …» en la carpeta');
-      var n = norm_(elegido.getName());
-      var mi = MESES_ES.findIndex(function (m) { return n.indexOf(m) >= 0; });
-      var anioArchivo = (n.match(/20\d\d/) || [String(anio)])[0];
-      var l = SpreadsheetApp.openById(elegido.getId());
-      cargar('horario', {
-        tipo: 'horario', archivo: elegido.getName(),
-        mes: mi >= 0 ? anioArchivo + '-' + ('0' + (mi + 1)).slice(-2) : undefined,
-        hojas: { 'CUADRO DE TURNO': sinCedula_(valores_(l, 'CUADRO DE TURNO')), 'HORARIO PASOS': valores_(l, 'HORARIO PASOS') },
-      });
-    } catch (e) { errores.push('CARPETA_HORARIOS: ' + e.message); }
-  } else errores.push('CARPETA_HORARIOS: no está configurada (ejecute «autoconfigurar»)');
-
   return { informe: informe, errores: errores };
 }
 
@@ -1326,7 +1301,7 @@ function instalarActivadorDiario() {
 function diagnosticar() {
   exigirAdminOEditor_();
   var p = propiedades_().getProperties(), s = [];
-  ['ID_BASE', 'ID_FOTOS', 'ID_CHARLAS', 'ID_BUZON', 'ID_NPS', 'ID_MEDICA', 'ID_ILSC', 'CARPETA_HORARIOS'].forEach(function (k) { s.push(k + ': ' + (p[k] ? 'configurado' : 'FALTA')); });
+  ['ID_BASE', 'ID_FOTOS', 'ID_CHARLAS', 'ID_BUZON', 'ID_NPS', 'ID_MEDICA', 'ID_ILSC'].forEach(function (k) { s.push(k + ': ' + (p[k] ? 'configurado' : 'FALTA')); });
   s.push('ADMINS: ' + listaCorreos_('ADMINS').length + ' correo(s) · VISORES: ' + listaCorreos_('VISORES').length + ' correo(s)');
   s.push('Recursos de la interfaz: ' + (p.RECURSOS || RECURSOS_POR_DEFECTO));
   s.push('Activadores: ' + ScriptApp.getProjectTriggers().length);

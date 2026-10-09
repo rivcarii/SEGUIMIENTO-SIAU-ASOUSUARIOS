@@ -77,11 +77,11 @@ test("sedes, técnicos y metas: se agregan, se desactivan y se editan", () => {
 
 test("alias: un nombre sin reconocer se asigna a una sede y las filas pendientes se corrigen solas", () => {
   const { api, nucleo } = nuevoNucleo();
-  const r = nucleo.sincronizar({ tipo: "charlas_matriz", archivo: "CONS_CHARLAS_2026", anio: 2026, hojas: { "CHARLAS USUARIOS": [["x"], ["SEDES", "SEPTIEMBRE"], ["CARRIZAL I", "40"]] } });
-  assert.deepEqual(r.sedes_no_reconocidas, ["CARRIZAL I"]);
-  assert.deepEqual(api("GET", "/api/admin/personal", { q: { mes: "2026-09" } }).sin_reconocer, [{ t: "CARRIZAL I", n: 1 }]);
+  const r = nucleo.sincronizar({ tipo: "charlas_matriz", archivo: "CONS_CHARLAS_2026", anio: 2026, hojas: { "CHARLAS USUARIOS": [["x"], ["SEDES", "SEPTIEMBRE"], ["CARRIZAL NORTE", "40"]] } });
+  assert.deepEqual(r.sedes_no_reconocidas, ["CARRIZAL NORTE"]);
+  assert.deepEqual(api("GET", "/api/admin/personal", { q: { mes: "2026-09" } }).sin_reconocer, [{ t: "CARRIZAL NORTE", n: 1 }]);
   const carrizal = api("GET", "/api/config").sedes.find((s) => s.nombre === "P. CARRIZAL");
-  assert.equal(api("POST", `/api/admin/sedes/${carrizal.id}/alias`, { cuerpo: { texto: "CARRIZAL I" } }).reasignadas, 1);
+  assert.equal(api("POST", `/api/admin/sedes/${carrizal.id}/alias`, { cuerpo: { texto: "CARRIZAL NORTE" } }).reasignadas, 1);
   assert.deepEqual(api("GET", "/api/admin/personal", { q: { mes: "2026-09" } }).sin_reconocer, []);
 });
 
