@@ -15,12 +15,18 @@ async function reducir(file, max = 1600) {
 }
 const aBase64 = (blob) => new Promise((ok, no) => { const r = new FileReader(); r.onload = () => ok(String(r.result).split(",")[1]); r.onerror = () => no(new Error("No se pudo leer el archivo")); r.readAsDataURL(blob); });
 async function subir(blob) { return (await api("/api/admin/foto", { json: { base64: await aBase64(blob), tipo: blob.type } })).archivo; }
-/** Miniatura JPEG diminuta (≤ 40 000 caracteres) que viaja dentro del propio registro para que la Fototeca la muestre al instante. */
+/**
+ * Miniatura que viaja dentro del propio registro (≤ 40 000 caracteres) para que la Fototeca la muestre al instante.
+ * Se prueba del tamaño más grande al más chico (WebP si el navegador lo genera, si no JPEG) para que se vea nítida en pantallas de alta densidad.
+ */
 async function miniatura(blob) {
-  const bmp = await createImageBitmap(blob), k = Math.min(1, 280 / Math.max(bmp.width, bmp.height));
-  const c = document.createElement("canvas"); c.width = Math.max(1, Math.round(bmp.width * k)); c.height = Math.max(1, Math.round(bmp.height * k));
-  c.getContext("2d").drawImage(bmp, 0, 0, c.width, c.height);
-  for (const q of [0.7, 0.55, 0.4, 0.25]) { const u = c.toDataURL("image/jpeg", q); if (u.length <= 40000) return u; }
+  const bmp = await createImageBitmap(blob);
+  for (const lado of [560, 480, 400, 320, 240]) {
+    const k = Math.min(1, lado / Math.max(bmp.width, bmp.height));
+    const c = document.createElement("canvas"); c.width = Math.max(1, Math.round(bmp.width * k)); c.height = Math.max(1, Math.round(bmp.height * k));
+    const g = c.getContext("2d"); g.imageSmoothingQuality = "high"; g.drawImage(bmp, 0, 0, c.width, c.height);
+    for (const tipo of ["image/webp", "image/jpeg"]) for (const q of [0.82, 0.72, 0.62, 0.5]) { const u = c.toDataURL(tipo, q); if (u.startsWith("data:" + tipo) && u.length <= 40000) return u; }
+  }
   return null;
 }
 const aviso = (el, ok, texto) => el.replaceChildren(h("div", { class: "msg " + (ok ? "ok" : "err") }, texto));
@@ -49,19 +55,22 @@ export function formEvidencia({ cfg, ev = null, alGuardar = null, alCancelar = n
   pintarPrev();
 
   const form = h("form", { class: "card", onsubmit: async (e) => {
-    e.preventDefault(); btn.disabled = true; msg.replaceChildren(h("div", { class: "msg" }, "Subiendo archivos…"));
+    e.preventDefault(); btn.disabled = true; btn.setAttribute("aria-busy", "true"); const total = f.fotos.files.length + f.docs.files.length; let hechos = 0;
+    const barra = h("i", { style: "--p:0.04" }), texto = h("div", { class: "msg" }, total ? `Subiendo archivo 1 de ${total}…` : "Guardando…");
+    const avanzar = () => { hechos++; barra.style.setProperty("--p", String(Math.max(0.04, hechos / (total + 1)))); texto.textContent = hechos < total ? `Subiendo archivo ${hechos + 1} de ${total}…` : "Guardando…"; };
+    msg.replaceChildren(texto, h("div", { class: "progreso", role: "progressbar", "aria-label": "Progreso de la subida" }, barra));
     try {
       const nuevas = [], nuevosDocs = [];
       let portadaNueva = null;
       for (const file of f.fotos.files) {
         const blob = await reducir(file);
         if (!nuevas.length) portadaNueva = await miniatura(blob).catch(() => null);
-        nuevas.push(await subir(blob));
+        nuevas.push(await subir(blob)); avanzar();
       }
       for (const file of f.docs.files) {
         if (file.type !== "application/pdf" && !/\.pdf$/i.test(file.name)) throw new Error(`"${file.name}": solo se aceptan documentos PDF`);
         if (file.size > MAX_PDF) throw new Error(`"${file.name}" pesa más de 10 MB: comprímalo antes de adjuntarlo`);
-        nuevosDocs.push({ id: await subir(new Blob([file], { type: "application/pdf" })), nombre: file.name.slice(0, 150) });
+        nuevosDocs.push({ id: await subir(new Blob([file], { type: "application/pdf" })), nombre: file.name.slice(0, 150) }); avanzar();
       }
       const ids = [...fotosActuales, ...nuevas];
       let portada = null;
@@ -75,7 +84,7 @@ export function formEvidencia({ cfg, ev = null, alGuardar = null, alCancelar = n
       if (alGuardar) return alGuardar();
       form.reset(); fotosActuales = []; docsActuales = []; pintarPrev(); f.fecha.value = fechaHoy(); aviso(msg, true, "Evidencia guardada.");
     } catch (er) { aviso(msg, false, er.message); }
-    btn.disabled = false;
+    btn.disabled = false; btn.removeAttribute("aria-busy");
   } },
     h("div", { class: "row" }, h("div", {}, h("label", {}, "Tipo de evidencia"), f.tipo), h("div", {}, h("label", {}, "Fecha"), f.fecha), h("div", {}, h("label", {}, "Sede"), f.sede), h("div", {}, h("label", {}, "SIAU responsable"), f.tecnico)),
     h("label", {}, "Título"), f.titulo, h("label", {}, "Descripción breve"), f.desc,

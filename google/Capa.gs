@@ -17,6 +17,33 @@ function ahoraBogota_() { return Utilities.formatDate(new Date(), ZONA, 'yyyy-MM
 function crearAlmacenHojas(libro) {
   var tablas = {};
 
+  // Caché entre ejecuciones (CacheService): leer una Hoja cuesta cientos de ms por tabla. Cada escritura cambia «gen» y deja obsoleto todo lo anterior.
+  var cache = null;
+  try { cache = typeof CacheService !== 'undefined' ? CacheService.getScriptCache() : null; } catch (e) { cache = null; }
+  var TROZO = 30000, TTL = 900;
+  function gen_() { try { return cache.get('gen') || '0'; } catch (e) { return '0'; } }
+  function desdeCache_(nombre, gen) {
+    try {
+      var n = Number(cache.get('m:' + gen + ':' + nombre));
+      if (!n) return null;
+      var claves = [], i;
+      for (i = 0; i < n; i++) claves.push('c:' + gen + ':' + nombre + ':' + i);
+      var got = cache.getAll(claves), txt = '';
+      for (i = 0; i < n; i++) { if (got[claves[i]] == null) return null; txt += got[claves[i]]; }
+      return JSON.parse(txt);
+    } catch (e) { return null; }
+  }
+  function aCache_(nombre, gen, T) {
+    try {
+      var txt = JSON.stringify({ filas: T.filas, sig: T.sig, escritas: T.escritas });
+      if (txt.length > 800000 || gen_() !== gen) return; // muy grande, o alguien escribió mientras leíamos
+      var obj = {}, n = Math.ceil(txt.length / TROZO) || 1;
+      for (var i = 0; i < n; i++) obj['c:' + gen + ':' + nombre + ':' + i] = txt.slice(i * TROZO, (i + 1) * TROZO);
+      obj['m:' + gen + ':' + nombre] = String(n);
+      cache.putAll(obj, TTL);
+    } catch (e) { /* sin caché no pasa nada */ }
+  }
+
   function hoja_(nombre) {
     var h = libro.getSheetByName('t_' + nombre);
     if (!h) {
@@ -31,6 +58,8 @@ function crearAlmacenHojas(libro) {
   function tabla_(nombre) {
     var T = tablas[nombre];
     if (T) return T;
+    var gen = cache ? gen_() : null, cacheado = cache ? desdeCache_(nombre, gen) : null;
+    if (cacheado) { T = tablas[nombre] = { hoja: null, filas: cacheado.filas, sig: cacheado.sig, sucia: false, escritas: cacheado.escritas }; return T; }
     var h = hoja_(nombre), filas = [], sig = 1;
     var n = h.getLastRow();
     if (n > 1) {
@@ -43,6 +72,7 @@ function crearAlmacenHojas(libro) {
       }
     }
     T = tablas[nombre] = { hoja: h, filas: filas, sig: sig, sucia: false, escritas: Math.max(0, n - 1) };
+    if (cache) aCache_(nombre, gen, T);
     return T;
   }
 
@@ -89,15 +119,17 @@ function crearAlmacenHojas(libro) {
     },
     /** Escribe en la hoja las tablas que cambiaron. */
     guardar: function () {
+      var huboCambios = false;
       Object.keys(tablas).forEach(function (k) {
         var T = tablas[k];
         if (!T.sucia) return;
+        huboCambios = true;
         var valores = T.filas.map(function (f) {
           var j = JSON.stringify(f);
           if (j.length > 49000) throw new Error('Un registro de «' + k + '» es demasiado grande para una celda.');
           return [String(f.id), j];
         });
-        var h = T.hoja, necesarias = valores.length + 1;
+        var h = T.hoja || (T.hoja = hoja_(k)), necesarias = valores.length + 1;
         if (h.getMaxRows() < necesarias) h.insertRowsAfter(h.getMaxRows(), necesarias - h.getMaxRows() + 200);
         if (valores.length) {
           h.getRange(2, 1, valores.length, 2).setNumberFormat('@');
@@ -107,6 +139,7 @@ function crearAlmacenHojas(libro) {
         T.escritas = valores.length; T.sucia = false;
       });
       SpreadsheetApp.flush();
+      if (cache && huboCambios) { try { cache.put('gen', Date.now() + '-' + Math.floor(Math.random() * 1e6), 21600); } catch (e) { /* ignorar */ } }
     },
   };
   return almacen;

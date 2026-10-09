@@ -68,3 +68,10 @@ export function tituloGrande(kicker, titulo) {
 
 export const mesLegible = (m) => new Date(m + "-15T12:00:00").toLocaleDateString("es-CO", { month: "long", year: "numeric" });
 
+
+// ---- Estados de carga: esqueletos que mantienen la forma del contenido para que nada salte al llegar los datos
+export const sk = (clase = "", estilo = "") => h("div", { class: "sk " + clase, style: estilo || null, "aria-hidden": "true" });
+export const cargando = (...hijos) => h("div", { class: "cargando", role: "status", "aria-live": "polite", "aria-label": "Cargando" }, ...hijos);
+export const skFigura = (cls = "t6") => h("section", { class: "figura " + cls }, sk("l-titulo"), sk("l-sub"), sk("l-grafico"));
+export const skTarjetas = (n = 6, alto = 190) => h("div", { class: "siau-grid" }, Array.from({ length: n }, () => h("div", { class: "siau-card" }, sk("l-titulo"), sk("l-chip"), sk("", `height:${alto - 110}px;border-radius:12px`))));
+export const skGaleria = (n = 8) => h("div", { class: "grid galeria" }, Array.from({ length: n }, () => h("div", { class: "card ev sk-card" }, sk("", "aspect-ratio:4/3;border-radius:0"), h("div", { class: "cu" }, sk("l-chip"), sk("l-titulo")))));

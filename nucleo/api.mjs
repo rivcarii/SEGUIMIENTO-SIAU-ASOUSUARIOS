@@ -204,11 +204,11 @@ export function crearNucleo({ almacen, fotos, hoy = () => new Date().toLocaleDat
     const ids = Array.isArray(b.fotos) ? b.fotos : [];
     if (ids.length > 30) throw bad("Máximo 30 fotos por evidencia");
     for (const f of ids) if (typeof f !== "string" || !fotos.existe(f)) throw bad("Foto no encontrada: súbela de nuevo");
-    // La portada es una miniatura (JPEG diminuto) guardada en el propio registro: se ve al instante y no depende de que el navegador pueda abrir Drive.
+    // La portada es una miniatura (JPEG o WebP diminuto) guardada en el propio registro: se ve al instante y no depende de que el navegador pueda abrir Drive.
     const docs = Array.isArray(b.documentos) ? b.documentos : [];
     if (docs.length > 20) throw bad("Máximo 20 documentos por evidencia");
     const documentos = docs.map((d) => { if (!d || typeof d.id !== "string" || !fotos.existe(d.id)) throw bad("Documento no encontrado: súbelo de nuevo"); return { id: d.id, nombre: txt(d.nombre, 150) || "Documento.pdf" }; });
-    const portada = ids.length && typeof b.portada === "string" && /^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/.test(b.portada) && b.portada.length <= 40000 ? b.portada : null;
+    const portada = ids.length && typeof b.portada === "string" && /^data:image\/(jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(b.portada) && b.portada.length <= 40000 ? b.portada : null;
     return { area: tipo.area, tipo: tipo.clave, titulo: txt(b.titulo, 200, true), descripcion: txt(b.descripcion, 5000), fecha: b.fecha, sede_id: sede, tecnico_id: tec,
       cantidad: enteroEn(b.cantidad, 1, 100000, 1), asistentes: enteroEn(b.asistentes, 0, 100000, null), fotos: JSON.stringify(ids), documentos: JSON.stringify(documentos), portada };
   }

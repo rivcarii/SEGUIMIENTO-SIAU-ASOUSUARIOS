@@ -8,6 +8,7 @@ let cfg, seccion = "nueva", titulo;
 const aviso = (el, ok, texto) => el.replaceChildren(h("div", { class: "msg " + (ok ? "ok" : "err") }, texto));
 
 async function iniciar() {
+  app.replaceChildren(h("div", { class: "cargando-centro", role: "status" }, h("span", { class: "rueda" }), "Abriendo el administrador…"));
   try {
     const s = await api("/api/sesion");
     if (s.rol !== "admin") throw new Error("Solo los administradores pueden entrar aquí.");

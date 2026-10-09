@@ -6,7 +6,7 @@ import { construir } from "../google/construir.mjs";
 
 const CODIGO = construir();
 
-function entorno({ usuario = "siau@miredips.org", dueno = "siau@miredips.org", props = {}, archivos = [] } = {}) {
+function entorno({ usuario = "siau@miredips.org", dueno = "siau@miredips.org", props = {}, archivos = [], cache = false } = {}) {
   const propiedades = { ...props }, logs = [], hojasPorLibro = new Map(), archivosPorId = new Map(), triggers = [];
   let seq = 0;
   const celdas = (h, f, c, nf, nc) => Array.from({ length: nf }, (_, i) => Array.from({ length: nc }, (_, j) => h.datos[f - 1 + i]?.[c - 1 + j] ?? ""));
@@ -73,6 +73,7 @@ function entorno({ usuario = "siau@miredips.org", dueno = "siau@miredips.org", p
       newTrigger: (fn) => { const t = { getHandlerFunction: () => fn }; const b = { timeBased: () => b, everyDays: () => b, atHour: () => b, create: () => { triggers.push(t); return t; } }; return b; } },
     Buffer,
   };
+  if (cache) { const m = new Map(); ctx.CacheService = { getScriptCache: () => ({ get: (k) => m.get(k) ?? null, put: (k, v) => { m.set(k, v); }, putAll: (o) => { for (const [k, v] of Object.entries(o)) m.set(k, v); }, getAll: (ks) => Object.fromEntries(ks.filter((k) => m.has(k)).map((k) => [k, m.get(k)])), remove: (k) => { m.delete(k); } }) }; }
   vm.createContext(ctx);
   vm.runInContext(CODIGO, ctx);
   const llamar = (metodo, ruta, { q, cuerpo } = {}) => JSON.parse(ctx.llamar(JSON.stringify({ metodo, ruta, q, cuerpo })));
@@ -265,4 +266,16 @@ test("permisos: ADMINS2, ADMINS3, VISORES2… también cuentan y se ignoran may�
     assert.equal(e.llamar("POST", "/api/admin/tecnicos", { cuerpo: { nombre: "X" + usuario.length } }).ok, rol, usuario);
     assert.equal(e.llamar("GET", "/api/config").ok, usuario !== "otra@miredips.org", usuario);
   }
+});
+
+test("caché: la segunda lectura no va a la Hoja; cualquier escritura la invalida", () => {
+  const e = entorno({ cache: true });
+  e.ctx.configurar();
+  const sedes = () => e.llamar("GET", "/api/config").datos.sedes.length;
+  assert.equal(sedes(), 40);
+  const hoja = e.hojasPorLibro.get(e.propiedades.ID_BASE).getSheetByName("t_sedes");
+  hoja.datos.push(["999", JSON.stringify({ ...JSON.parse(hoja.datos.at(-1)[1]), id: 999, nombre: "SEDE ESCRITA A ESCONDIDAS" })]);
+  assert.equal(sedes(), 40); // sigue leyendo lo guardado en caché
+  e.llamar("POST", "/api/admin/tecnicos", { cuerpo: { nombre: "Nueva Persona" } }); // cualquier escritura limpia la caché
+  assert.equal(sedes(), 41);
 });

@@ -1,6 +1,6 @@
 // Motor de consulta: una medida + una agrupación + filtros. También entiende frases como «encuestas por sede en septiembre».
-import { api, h, mesActual, opciones } from "../shared/comun.js";
-import { COLOR, columnas, barrasH, mesCorto } from "../shared/graficos.js";
+import { api, h, mesActual, opciones, sk } from "../shared/comun.js";
+import { COLOR, barrasMes, area, barrasH, mesCorto } from "../shared/graficos.js";
 
 const sin = (t) => String(t ?? "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
 const MESES = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"];
@@ -59,7 +59,7 @@ export async function vistaConsultas(c, S) {
   const poner = () => { medida.value = q.medida; por.value = q.por; desde.value = q.desde; hasta.value = q.hasta; sede.value = q.sede; siau.value = q.siau; };
 
   async function ejecutar() {
-    leer(); salida.replaceChildren(h("p", { class: "mut" }, "Consultando…"));
+    leer(); salida.replaceChildren(h("div", { class: "cargando-centro", role: "status" }, h("span", { class: "rueda" }), "Consultando…"), sk("l-grafico"));
     const p = new URLSearchParams(Object.fromEntries(Object.entries(q).filter(([, v]) => v)));
     let r;
     try { r = await api("/api/consulta?" + p); } catch (e) { return salida.replaceChildren(h("div", { class: "msg err" }, e.message)); }
@@ -67,7 +67,7 @@ export async function vistaConsultas(c, S) {
     const sub = `${r.medida.etiqueta} · ${r.por === "mes" ? "por mes" : r.por === "sede" ? "por sede" : r.por === "siau" ? "por SIAU" : "por tipo"} · ${mesTxt(r.meses[0])}${r.meses.length > 1 ? " – " + mesTxt(r.meses.at(-1)) : ""}`;
     const miles = (v) => (v == null ? "—" : Number(v).toLocaleString("es-CO"));
     const grafico = !r.filas.length ? h("p", { class: "mut" }, "No hay datos con esos filtros.")
-      : r.por === "mes" && r.filas.length > 1 ? columnas(r.filas.map((f) => ({ mes: f.clave, v: f.valor ?? 0 })), [{ clave: "v", etq: r.medida.etiqueta, color: COLOR.nps }], { titulo: sub })
+      : r.por === "mes" && r.filas.length > 1 ? barrasMes(r.filas.map((f) => ({ mes: f.clave, v: f.valor ?? 0 })), [{ clave: "v", etq: r.medida.etiqueta, color: COLOR.nps }], { titulo: sub })
       : barrasH(r.filas.slice(0, 15).map((f) => ({ etq: f.etiqueta, valor: f.valor })), { color: COLOR.nps });
     salida.replaceChildren(h("section", { class: "card" }, h("h3", { style: "margin:0 0 2px;color:var(--azul)" }, sub), h("p", { class: "sub mut", style: "margin:0 0 10px" }, r.filas.length ? `${r.filas.length} fila(s)` : ""), grafico),
       r.filas.length ? h("section", { class: "card scroll", style: "margin-top:14px" }, h("table", { class: "cient" },

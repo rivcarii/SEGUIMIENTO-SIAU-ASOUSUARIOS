@@ -1,4 +1,4 @@
-import { api, h, mesActual, fmtFecha, opciones, pintarMarca, mascota, tituloGrande, mesLegible, recurso } from "../shared/comun.js";
+import { api, h, mesActual, fmtFecha, opciones, pintarMarca, mascota, tituloGrande, mesLegible, recurso, sk, skTarjetas } from "../shared/comun.js";
 import { vistaPanel } from "./panel.js";
 import { vistaConsultas } from "./consultas.js";
 import { vistaFototeca } from "./fototeca.js";
@@ -10,10 +10,13 @@ const AREAS = ["siau", "asociacion"];
 let tg, seg, segThumb, cont, tabThumb;
 
 async function iniciar() {
-  try { S.cfg = await api("/api/config"); }
+  pintarMarca({ nombre_siau: "SIAU", nombre_asociacion: "Asociación de Usuarios" });
+  app.replaceChildren(h("div", { class: "cargando", role: "status", "aria-label": "Abriendo la plataforma" },
+    sk("", "height:14px;width:190px;margin:10px 0 12px"), sk("", "height:46px;width:min(420px,70%);border-radius:14px;margin-bottom:22px"), sk("", "height:46px;width:min(640px,100%);border-radius:999px;margin-bottom:22px"),
+    sk("l-tira", "height:92px;border-radius:22px"), h("div", { class: "cargando-centro" }, h("span", { class: "rueda" }), "Abriendo la plataforma…")));
+  try { [S.cfg, S.rol] = await Promise.all([api("/api/config"), api("/api/sesion").then((u) => u.rol).catch(() => null)]); }
   catch (e) { return app.replaceChildren(h("div", { class: "login" }, mascota("atento", 170), h("div", { class: "card" }, h("h2", {}, "No se pudo abrir"), h("p", {}, e.message)))); }
   pintarMarca(S.cfg.marca);
-  try { S.rol = (await api("/api/sesion")).rol; } catch { S.rol = null; }
   if (S.rol === "admin") document.getElementById("irAdmin").hidden = false;
   S.rerender = render;
   montar();
@@ -64,7 +67,7 @@ const medidor = (m) => { const p = pctDe(m.valor, m.meta); return h("div", { cla
 
 async function vistaCumplimiento(c) {
   const mes = h("input", { type: "month", value: S.mes, "aria-label": "Mes", onchange: () => { S.mes = mes.value || mesActual(); render(); } });
-  c.append(h("p", { class: "mut" }, "Cargando…"));
+  c.replaceChildren(h("div", { class: "cargando" }, sk("l-tira", "height:70px;border-radius:22px;margin-bottom:14px"), skTarjetas(6)));
   let d, est;
   try { [d, est] = await Promise.all([api("/api/cumplimiento?mes=" + S.mes), api("/api/estado").catch(() => null)]); }
   catch (e) { return c.replaceChildren(h("div", { class: "msg err" }, e.message)); }
