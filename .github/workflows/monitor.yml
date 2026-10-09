@@ -1,0 +1,51 @@
+name: Monitor de consolidados
+
+# El script de Google (en la cuenta siau@miredips.org) sincroniza a diario a las 6:00 a. m.
+# Este monitor corre 1 h 30 después, revisa que todo haya llegado y mantiene UN issue con los pendientes.
+# El informe no incluye nombres de personas ni datos de usuarios (el repositorio es público).
+on:
+  schedule:
+    - cron: "30 12 * * *" # 7:30 a. m. hora de Colombia
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency: monitor
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Revisar la plataforma
+        run: node bot/monitor.mjs
+        env:
+          PLATAFORMA_URL: ${{ secrets.PLATAFORMA_URL }}
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+      - name: Avisar si no se pudo consultar la plataforma
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          printf '# Estado de los consolidados\n\n- 🔴 No se pudo consultar la plataforma (¿está en línea? ¿coinciden los secretos PLATAFORMA_URL y BOT_TOKEN?).\n\n_Generado %s._\n' "$(date -u +%FT%TZ)" > aviso.md
+          numero=$(gh issue list --label estado-consolidados --state open --json number --jq '.[0].number // empty')
+          gh label create estado-consolidados --color D93F0B --description "Pendientes de los consolidados" 2>/dev/null || true
+          if [ -n "$numero" ]; then gh issue edit "$numero" --body-file aviso.md; else gh issue create --title "Estado de los consolidados" --label estado-consolidados --body-file aviso.md; fi
+      - name: Mantener el issue de estado
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          titulo="Estado de los consolidados"
+          numero=$(gh issue list --label estado-consolidados --state open --json number --jq '.[0].number // empty')
+          if grep -q "✅ Todo en orden" informe.md; then
+            [ -n "$numero" ] && gh issue close "$numero" --comment "Todo en orden: $(date -u +%F)." || true
+            exit 0
+          fi
+          gh label create estado-consolidados --color D93F0B --description "Pendientes de los consolidados" 2>/dev/null || true
+          if [ -n "$numero" ]; then gh issue edit "$numero" --body-file informe.md
+          else gh issue create --title "$titulo" --label estado-consolidados --body-file informe.md; fi

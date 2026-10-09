@@ -1,69 +1,50 @@
-import { viernesDelMes } from "../lib.mjs";
+// Reglas del monitor. Puras (sin red) para poder probarlas. Nada de lo que produce incluye nombres de personas.
+export const REQUERIDAS = {
+  horario: "Horario del personal",
+  charlas_matriz: "Consolidado de charlas",
+  buzon: "Consolidado de buzón",
+  nps: "Encuestas NPS",
+  medica: "Evaluación médica",
+  ilsc: "Registro del intérprete (LSC)",
+};
+export const HORAS_MAX = 36; // el script de Drive corre a diario; más de 36 h sin novedades es una falla
+const NIVEL = { alto: 0, medio: 1, info: 2 };
+const lista = (xs, n = 8) => xs.slice(0, n).join(", ") + (xs.length > n ? ` y ${xs.length - n} más` : "");
 
-export const normalizar = (s) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+export function analizar(e, ahora = Date.now()) {
+  const h = [];
+  const agregar = (nivel, texto) => h.push({ nivel, texto });
 
-/** Extrae YYYY-MM-DD o YYYY-MM de una ruta; si no hay, usa modificado (ISO). */
-export function extraerFecha(ruta, modificado) {
-  const m = /(\d{4})[-_.](\d{2})(?:[-_.](\d{2}))?/.exec(ruta);
-  if (m && +m[2] >= 1 && +m[2] <= 12) return { mes: `${m[1]}-${m[2]}`, dia: m[3] ? `${m[1]}-${m[2]}-${m[3]}` : null, origen: "nombre" };
-  if (modificado) return { mes: modificado.slice(0, 7), dia: modificado.slice(0, 10), origen: "modificado" };
-  return null;
+  for (const [tipo, nombre] of Object.entries(REQUERIDAS)) {
+    const f = e.fuentes.find((x) => x.tipo === tipo);
+    if (!f) { agregar("alto", `${nombre}: nunca se ha sincronizado. Revise el script de Drive (propiedades del script y permisos).`); continue; }
+    const horas = (ahora - Date.parse(f.creado.replace(" ", "T") + "Z")) / 36e5;
+    if (horas > HORAS_MAX) agregar("alto", `${nombre}: lleva ${Math.round(horas)} h sin sincronizar (máximo ${HORAS_MAX} h).`);
+    if (f.sedes_no_reconocidas.length) agregar("medio", `${nombre}: ${f.sedes_no_reconocidas.length} nombre(s) de sede sin reconocer (${lista(f.sedes_no_reconocidas)}). Indíquelos en Administrador → Personal y rotación.`);
+    if (f.registros === 0) agregar("medio", `${nombre}: la última sincronización no trajo registros.`);
+  }
+  const horario = e.fuentes.find((x) => x.tipo === "horario");
+  if (horario?.mes && horario.mes !== e.mes) agregar("medio", `El horario cargado es de ${horario.mes}, no de ${e.mes}: suba el horario del mes a la carpeta de horarios.`);
+  if (e.personal.sin_cobertura.length) agregar("medio", `${e.personal.sin_cobertura.length} sede(s) sin SIAU este mes: ${lista(e.personal.sin_cobertura)}.`);
+
+  // Ritmo: a mitad de mes un SIAU debería llevar ~la mitad de la meta. Solo cuentas, sin nombres.
+  const esperado = (100 * e.dia) / e.dias_mes, evaluados = e.progreso.filter((p) => p.encuestas_pct != null || p.charlas_pct != null);
+  const atrasados = evaluados.filter((p) => Math.min(p.encuestas_pct ?? 999, p.charlas_pct ?? 999) < esperado - 25).length;
+  if (e.dia >= 10 && atrasados) agregar("medio", `${atrasados} de ${evaluados.length} SIAU van por debajo del ritmo de sus metas mínimas (esperado hoy ≈ ${Math.round(esperado)} %).`);
+
+  if (e.actas && e.actas.esperadas > e.actas.entregadas) agregar("info", `${e.actas.esperadas - e.actas.entregadas} acta(s) de buzón vencidas sin entregar en ${e.actas.sedes_pendientes} sede(s).`);
+  for (const f of e.fuentes) if (f.avisos) agregar("info", `${REQUERIDAS[f.tipo] ?? f.tipo}: ${f.avisos} aviso(s) al leer el archivo (revise el resumen de la sincronización).`);
+  return h.sort((a, b) => NIVEL[a.nivel] - NIVEL[b.nivel]);
 }
 
-/** Sede cuyo nombre aparece en la ruta; gana el nombre más largo (evita "Sede Norte" vs "Sede Norte 2"). */
-export function detectarSede(ruta, sedes) {
-  const r = ` ${normalizar(ruta)} `;
-  return sedes.filter((s) => r.includes(` ${normalizar(s.nombre)} `)).sort((a, b) => b.nombre.length - a.nombre.length)[0] ?? null;
-}
-
-/**
- * archivos: {ruta, modificado}[] de UNA carpeta de Drive (recursiva, ruta = "Sede/archivo.pdf").
- * Devuelve por sede los archivos hallados del mes y los que no se pudieron asignar.
- */
-export function clasificar(archivos, sedes, mes) {
-  const porSede = new Map(sedes.map((s) => [s.id, { sede: s.nombre, archivos: [], dias: new Set() }]));
-  const sinSede = [], sinFecha = [];
-  for (const a of archivos) {
-    const f = extraerFecha(a.ruta, a.modificado);
-    if (!f) { sinFecha.push(a.ruta); continue; }
-    if (f.mes !== mes) continue;
-    const s = detectarSede(a.ruta, sedes);
-    if (!s) { sinSede.push(a.ruta); continue; }
-    const e = porSede.get(s.id);
-    e.archivos.push(a.ruta);
-    if (f.dia) e.dias.add(f.dia);
-  }
-  return { porSede, sinSede, sinFecha };
-}
-
-/**
- * Reporte de consolidación del mes.
- * carpetas: { actas: archivos[], encuestas: archivos[], charlas: archivos[] }
- */
-export function analizar({ mes, sedes, carpetas, metas = {} }) {
-  const hallazgos = [];
-  const viernes = viernesDelMes(mes);
-  const resumen = { mes, sedes: sedes.length, actas: {}, encuestas: {}, charlas: {} };
-
-  const actas = clasificar(carpetas.actas ?? [], sedes, mes);
-  const faltantes = [];
-  for (const [, e] of actas.porSede) {
-    const falta = viernes.filter((v) => !e.dias.has(v));
-    if (falta.length) { faltantes.push({ sede: e.sede, faltan: falta }); hallazgos.push(`Actas de buzón: ${e.sede} sin acta del ${falta.join(", ")}`); }
-  }
-  resumen.actas = { viernes, sedesIncompletas: faltantes.length, faltantes };
-
-  for (const [clave, etiqueta, meta] of [["encuestas", "Encuestas", metas.encuestas], ["charlas", "Charlas", metas.charlas]]) {
-    const c = clasificar(carpetas[clave] ?? [], sedes, mes);
-    const total = [...c.porSede.values()].reduce((s, e) => s + e.archivos.length, 0);
-    const sinArchivos = [...c.porSede.values()].filter((e) => !e.archivos.length).map((e) => e.sede);
-    resumen[clave] = { archivos: total, meta: meta ?? null, sinArchivos };
-    if (sinArchivos.length) hallazgos.push(`${etiqueta}: ${sinArchivos.length} sede(s) sin archivos en ${mes}: ${sinArchivos.join(", ")}`);
-    if (meta && total < meta) hallazgos.push(`${etiqueta}: ${total} archivo(s) vs meta ${meta}`);
-    resumen[clave].sinClasificar = [...c.sinSede, ...c.sinFecha];
-  }
-  for (const [n, c] of [["actas", actas]]) {
-    for (const r of [...c.sinSede, ...c.sinFecha]) hallazgos.push(`Actas: no se pudo asignar sede/fecha a "${r}"`);
-  }
-  return { ...resumen, hallazgos };
+const ICONO = { alto: "🔴", medio: "🟠", info: "🔵" };
+export function informeMarkdown(e, hallazgos, ahora = new Date()) {
+  const filas = Object.entries(REQUERIDAS).map(([t, n]) => { const f = e.fuentes.find((x) => x.tipo === t); return `| ${n} | ${f ? f.creado + " UTC" : "—"} | ${f ? f.registros : "—"} |`; });
+  return [
+    `# Estado de los consolidados · ${e.mes}`, "",
+    hallazgos.length ? hallazgos.map((x) => `- ${ICONO[x.nivel]} ${x.texto}`).join("\n") : "✅ Todo en orden: las fuentes están al día y no hay pendientes.", "",
+    "| Fuente | Última sincronización | Registros |", "|---|---|---|", ...filas, "",
+    `SIAU evaluados: ${e.personal.evaluados} (ausentes este mes: ${e.personal.ausentes}). Generado ${ahora.toISOString()}.`,
+    "_Este informe no incluye nombres de personas ni datos de usuarios._",
+  ].join("\n");
 }

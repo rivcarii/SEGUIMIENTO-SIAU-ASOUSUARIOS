@@ -60,16 +60,23 @@ Los consolidados viven en el Drive **institucional**, así que el enlace corre *
 - **Si la plantilla cambia de forma**, el lector avisa y omite ese bloque en lugar de leer celdas equivocadas.
 - Sin uso por ahora: el libro «Plantilla de recolección» por técnico (sus lectores siguen disponibles) y el consolidado `F_SIAU_031`.
 
-## Bot verificador de Drive (alternativa con cuenta de servicio)
+## Automatización (de punta a punta, sin intervención manual)
 
-`bot/verificar.mjs` lista tres carpetas de Drive (actas, encuestas, charlas), asigna cada archivo a una sede y mes **por su ruta** y reporta faltantes; el resultado aparece en el visor.
+```
+6:00  Script de Google (cuenta siau@miredips.org)  →  lee consolidados, filtra datos personales  →  plataforma
+7:30  Monitor del repositorio (GitHub Actions)     →  revisa que todo llegó y está completo       →  tablero + issue
+cada push / PR   Pruebas (GitHub Actions)
+```
 
-Convención de Drive: `Carpeta/<Sede>/<archivo con fecha AAAA-MM-DD>` (el nombre de la sede puede estar en la carpeta o en el archivo; sin fecha en el nombre usa la de modificación).
+| Quién | Qué hace | Dónde |
+|---|---|---|
+| **Script de Google** | Trae los 6 consolidados a diario (datos filtrados dentro de Drive) | [`apps-script/`](apps-script/EnlaceConsolidados.gs) |
+| **Monitor** (`bot/monitor.mjs`, 7:30 a. m.) | Revisa la plataforma y publica el resultado en el tablero ✓ y en **un solo issue** `Estado de los consolidados` (se actualiza; se cierra solo cuando todo está en orden) | [`monitor.yml`](.github/workflows/monitor.yml) |
+| **Pruebas** | `npm test` en cada cambio | [`ci.yml`](.github/workflows/ci.yml) |
 
-Configuración (secretos del repo, usados por `.github/workflows/verificar-drive.yml`):
-`PLATAFORMA_URL` (debe ser accesible desde internet), `BOT_TOKEN` (igual al del servidor), `GOOGLE_SERVICE_ACCOUNT_JSON`, `DRIVE_CARPETA_ACTAS`, `DRIVE_CARPETA_ENCUESTAS`, `DRIVE_CARPETA_CHARLAS`. Comparte cada carpeta (lectura) con el correo de la cuenta de servicio.
+El monitor avisa de: fuente **nunca sincronizada** o con más de **36 h** de atraso (rojo); nombres de sede **sin reconocer**; **horario** de otro mes; **sedes sin SIAU**; SIAU **por debajo del ritmo** de su meta (desde el día 10); actas de buzón **vencidas sin entregar**; avisos al leer archivos; y si la plataforma **no responde**. Como el repositorio es público, **el informe solo trae conteos y nombres de sede: nunca nombres de personas ni datos de usuarios** (eso se ve en el tablero, con `VISOR_PASSWORD`).
 
-Prueba local: `node bot/verificar.mjs 2026-10 --sin-publicar` (requiere las mismas variables).
+Secretos del repositorio (*Settings → Secrets and variables → Actions*): `PLATAFORMA_URL` (dirección pública de la plataforma) y `BOT_TOKEN` (el mismo del servidor). Prueba manual: *Actions → Monitor de consolidados → Run workflow*, o `PLATAFORMA_URL=… BOT_TOKEN=… npm run monitor -- --sin-publicar`. Las reglas están en [`bot/analisis.mjs`](bot/analisis.mjs) (con pruebas).
 
 ## Pendiente
 

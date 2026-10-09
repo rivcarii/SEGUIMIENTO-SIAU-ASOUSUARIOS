@@ -277,6 +277,24 @@ function cumplimiento(mes, hoy = hoyLocal()) {
   return r;
 }
 
+/** Estado para el monitor del repositorio: sin nombres de personas ni datos de usuarios (su informe se publica en un issue). */
+function estadoBot(hoy) {
+  if (!fechaValida(hoy)) throw bad("Fecha inválida");
+  const mes = hoy.slice(0, 7), c = cumplimiento(mes, hoy), filas = c.siau.tecnicos, evaluados = filas.filter((t) => !t.ausente);
+  const pct = (x) => (x.meta ? Math.round((100 * x.valor) / x.meta) : null);
+  const fuentes = db.prepare("SELECT fuente tipo, archivo, creado, resumen FROM sincronizaciones WHERE id IN (SELECT MAX(id) FROM sincronizaciones GROUP BY fuente)").all().map((f) => {
+    const r = JSON.parse(f.resumen);
+    return { tipo: f.tipo, archivo: f.archivo, creado: f.creado, registros: r.registros ?? r.personal ?? 0, avisos: (r.avisos ?? []).length, sedes_no_reconocidas: r.sedes_no_reconocidas ?? [], mes: r.mes ?? null };
+  });
+  return {
+    hoy, mes, dia: Number(hoy.slice(8)), dias_mes: ultimoDiaMes(mes), fuentes,
+    personal: { evaluados: evaluados.length, ausentes: filas.length - evaluados.length, sin_cobertura: c.siau.sin_cobertura.map((x) => x.sede) },
+    progreso: evaluados.map((t) => ({ encuestas_pct: pct(t.encuestas), charlas_pct: pct(t.charlas) })),
+    actas: c.actas_consolidado ? { esperadas: c.actas_consolidado.esperadas, entregadas: c.actas_consolidado.entregadas, sedes_pendientes: c.actas_consolidado.sedes_pendientes.length } : null,
+    sin_reconocer: c.sin_reconocer,
+  };
+}
+
 async function api(req, res, url) {
   const m = req.method, p = url.pathname, q = url.searchParams;
   let r;
@@ -306,6 +324,7 @@ async function api(req, res, url) {
   if (p.startsWith("/api/bot/")) {
     exigirBot(req);
     if (m === "GET" && p === "/api/bot/contexto") return json(res, { sedes: db.prepare("SELECT id,nombre FROM sedes WHERE activa=1").all(), tipos: db.prepare("SELECT clave,nombre,meta,alcance FROM tipos WHERE area='siau'").all() });
+    if (m === "GET" && p === "/api/bot/estado") return json(res, estadoBot(q.get("hoy") ?? hoyLocal()));
     if (m === "POST" && p === "/api/bot/consolidados") return json(res, sincronizarConsolidado(await leerJson(req, 8e6)), 201);
     if (m === "POST" && p === "/api/bot/verificacion") {
       const b = await leerJson(req);
