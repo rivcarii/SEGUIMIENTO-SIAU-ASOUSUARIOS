@@ -3,9 +3,9 @@ import { readFile, writeFile, unlink, stat } from "node:fs/promises";
 import { randomBytes } from "node:crypto";
 import { join, extname, normalize, sep } from "node:path";
 import { db, UPLOADS, ajuste, setAjuste } from "./db.mjs";
-import { crearResolver } from "./sedes.mjs";
-import { parsearRecoleccion, parsearSocializaciones } from "./consolidados.mjs";
-import { calcularCumplimiento, fechaValida, firmar, igualesSeguro, mesValido, tipoImagen, verificar } from "./lib.mjs";
+import { crearResolver, normalizar } from "./sedes.mjs";
+import { parsearBuzon, parsearCharlasMatriz, parsearEncuestas, parsearHorario, parsearIlsc, parsearRecoleccion, parsearSocializaciones } from "./consolidados.mjs";
+import { calcularCumplimiento, calcularPorTecnico, fechaValida, firmar, igualesSeguro, mesValido, tipoImagen, verificar } from "./lib.mjs";
 
 const PORT = Number(process.env.PORT ?? 3000);
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
@@ -125,32 +125,90 @@ async function subirImagen(req, max = 12e6) {
   return archivo;
 }
 
+const resolverSedes = () => crearResolver(db.prepare("SELECT id,nombre,codigo,alias FROM sedes").all());
+const ultimoDiaMes = (mes) => new Date(Number(mes.slice(0, 4)), Number(mes.slice(5)), 0).getDate();
+
 /** Reemplaza lo que ya se había leído de ese archivo (así se reflejan correcciones y filas borradas). */
 function sincronizarConsolidado(b) {
   const fuente = txt(b.archivo_id, 200, true), archivo = txt(b.archivo, 300);
-  const resolver = crearResolver(db.prepare("SELECT id,nombre,codigo,alias FROM sedes").all());
+  const resolver = resolverSedes();
   const noReconocidas = new Set(), resumen = { tipo: b.tipo, archivo };
-  const sedeId = (t, alt) => { const s = resolver(t) ?? (alt ? resolver(alt) : null); if (!s) noReconocidas.add(t || alt || "(vacía)"); return s?.id ?? null; };
+  const sedeId = (t, alt) => { const x = resolver(t) ?? (alt ? resolver(alt) : null); if (!x) noReconocidas.add(t || alt || "(vacía)"); return x?.id ?? null; };
+  const hojas = b.hojas ?? {};
+  const guardarMensual = (filas, tecnico = "") => {
+    db.prepare("DELETE FROM consolidado_mensual WHERE fuente=?").run(fuente);
+    const ins = db.prepare("INSERT INTO consolidado_mensual(fuente,tecnico,sede_id,sede_texto,periodo,indicador,valor) VALUES (?,?,?,?,?,?,?)");
+    for (const f of filas) ins.run(fuente, tecnico, sedeId(f.sede_texto), f.sede_texto, f.periodo, f.indicador, f.valor);
+    resumen.registros = filas.length;
+  };
   db.exec("BEGIN");
   try {
     if (b.tipo === "socializaciones") {
-      const r = parsearSocializaciones(b.hojas?.["REGISTRO SOCIALIZACIONES"] ?? []);
+      const r = parsearSocializaciones(hojas["REGISTRO SOCIALIZACIONES"] ?? []);
       db.prepare("DELETE FROM consolidado_charlas WHERE fuente=?").run(fuente);
       const ins = db.prepare("INSERT INTO consolidado_charlas(fuente,fecha,sede_id,sede_texto,tema,tipo,asistentes,responsable) VALUES (?,?,?,?,?,?,?,?)");
       for (const c of r.charlas) ins.run(fuente, c.fecha, sedeId(c.sede_texto, c.sede_alterna), c.sede_texto || c.sede_alterna, c.tema, c.tipo, c.asistentes, c.responsable);
       Object.assign(resumen, { charlas: r.charlas.length, avisos: r.avisos });
     } else if (b.tipo === "recoleccion") {
-      const r = parsearRecoleccion(b.hojas ?? {});
-      db.prepare("DELETE FROM consolidado_mensual WHERE fuente=?").run(fuente);
-      const ins = db.prepare("INSERT INTO consolidado_mensual(fuente,tecnico,sede_id,sede_texto,periodo,indicador,valor) VALUES (?,?,?,?,?,?,?)");
-      for (const f of r.filas) ins.run(fuente, r.tecnico, sedeId(f.sede_texto), f.sede_texto, f.periodo, f.indicador, f.valor);
-      Object.assign(resumen, { tecnico: r.tecnico, anio: r.anio, sedes: r.sedes, registros: r.filas.length, avisos: r.avisos });
-    } else throw bad("tipo debe ser «socializaciones» o «recoleccion»");
+      const r = parsearRecoleccion(hojas);
+      guardarMensual(r.filas, r.tecnico);
+      Object.assign(resumen, { tecnico: r.tecnico, anio: r.anio, sedes: r.sedes, avisos: r.avisos });
+    } else if (b.tipo === "charlas_matriz") {
+      const anio = Number(b.anio) || Number(/20\d\d/.exec(archivo)?.[0]) || new Date().getFullYear();
+      const r = parsearCharlasMatriz(hojas, anio);
+      guardarMensual(r.filas); Object.assign(resumen, { anio, avisos: r.avisos });
+    } else if (b.tipo === "nps" || b.tipo === "medica") {
+      const r = parsearEncuestas(hojas["Respuestas de formulario 1"] ?? Object.values(hojas)[0] ?? [], b.tipo);
+      guardarMensual(r.filas); resumen.avisos = r.avisos;
+    } else if (b.tipo === "ilsc") {
+      const r = parsearIlsc(hojas);
+      guardarMensual(r.filas); resumen.avisos = r.avisos;
+    } else if (b.tipo === "buzon") {
+      const r = parsearBuzon(hojas);
+      db.prepare("DELETE FROM consolidado_actas WHERE fuente=?").run(fuente);
+      const ins = db.prepare("INSERT INTO consolidado_actas(fuente,sede_id,sede_texto,codigo,fecha,estado) VALUES (?,?,?,?,?,?)");
+      for (const a of r.actas) ins.run(fuente, sedeId(a.sede_texto), a.sede_texto, a.codigo, a.fecha, a.estado);
+      Object.assign(resumen, { registros: r.actas.length, avisos: r.avisos });
+    } else if (b.tipo === "horario") {
+      Object.assign(resumen, aplicarHorario(parsearHorario(hojas, b.mes), sedeId));
+    } else throw bad("tipo no válido");
     resumen.sedes_no_reconocidas = [...noReconocidas];
     db.prepare("INSERT INTO sincronizaciones(fuente,archivo,resumen) VALUES (?,?,?)").run(b.tipo, archivo, JSON.stringify(resumen));
     db.exec("COMMIT");
-  } catch (e) { db.exec("ROLLBACK"); throw e; }
+  } catch (e) { db.exec("ROLLBACK"); if (e.privacidad) throw bad(e.message); throw e; }
   return resumen;
+}
+
+/** El horario manda sobre las asignaciones y ausencias «de horario» de ese mes; lo cargado a mano no se toca. */
+function aplicarHorario(r, sedeId) {
+  if (!r.mes) return { mes: null, personal: 0, avisos: r.avisos };
+  const desde = `${r.mes}-01`, hasta = `${r.mes}-${String(ultimoDiaMes(r.mes)).padStart(2, "0")}`;
+  db.prepare("DELETE FROM asignaciones WHERE origen='horario' AND desde=?").run(desde);
+  db.prepare("DELETE FROM ausencias WHERE origen='horario' AND desde>=? AND desde<=?").run(desde, hasta);
+  const buscar = db.prepare("SELECT id FROM tecnicos WHERE clave=?"), crear = db.prepare("INSERT INTO tecnicos(nombre,rol,clave) VALUES (?,?,?)"), rol = db.prepare("UPDATE tecnicos SET rol=? WHERE id=?");
+  const asig = db.prepare("INSERT INTO asignaciones(tecnico_id,sede_id,desde,hasta,origen) VALUES (?,?,?,?, 'horario')"), aus = db.prepare("INSERT INTO ausencias(tecnico_id,tipo,desde,hasta,nota,origen) VALUES (?,?,?,?,?, 'horario')");
+  let nAsig = 0, nAus = 0;
+  for (const p of r.personal) {
+    const clave = normalizar(p.nombre);
+    let id = buscar.get(clave)?.id;
+    if (id) rol.run(p.rol, id); else id = Number(crear.run(p.nombre.replace(/\s+/g, " ").trim(), p.rol, clave).lastInsertRowid);
+    for (const t of p.sedes_texto) { const sid = sedeId(t); if (sid) { asig.run(id, sid, desde, hasta); nAsig++; } }
+    for (const a of p.ausencias) { aus.run(id, a.tipo, a.desde, a.hasta, a.nota); nAus++; }
+  }
+  return { mes: r.mes, personal: r.personal.length, asignaciones: nAsig, ausencias: nAus, avisos: r.avisos };
+}
+
+/** Tras agregar un alias, las filas que no se habían podido asignar a una sede se vuelven a resolver. */
+function reasignarSedes() {
+  const resolver = resolverSedes();
+  let n = 0;
+  for (const tabla of ["consolidado_mensual", "consolidado_charlas", "consolidado_actas"]) {
+    for (const { t } of db.prepare(`SELECT DISTINCT sede_texto t FROM ${tabla} WHERE sede_id IS NULL`).all()) {
+      const x = resolver(t);
+      if (x) n += Number(db.prepare(`UPDATE ${tabla} SET sede_id=? WHERE sede_id IS NULL AND sede_texto=?`).run(x.id, t).changes);
+    }
+  }
+  return n;
 }
 
 function config() {
@@ -167,16 +225,54 @@ function config() {
   };
 }
 
-function cumplimiento(mes) {
+const hoyLocal = () => new Date().toLocaleDateString("sv");
+
+function cumplimiento(mes, hoy = hoyLocal()) {
   if (!mesValido(mes)) throw bad("Mes inválido");
+  if (!fechaValida(hoy)) throw bad("Fecha inválida");
   const tipos = db.prepare("SELECT * FROM tipos").all();
   const evs = db.prepare("SELECT tipo,tecnico_id,sede_id,fecha,cantidad FROM evidencias WHERE substr(fecha,1,7)=?").all(mes);
-  const tecnicos = db.prepare("SELECT id,nombre FROM tecnicos WHERE activo=1 ORDER BY nombre").all();
+  const todos = db.prepare("SELECT id,nombre,rol,activo FROM tecnicos ORDER BY nombre").all();
+  const tecnicos = todos.filter((t) => t.activo && t.rol === "tecnico").map(({ id, nombre }) => ({ id, nombre }));
   const sedes = db.prepare("SELECT id,nombre FROM sedes WHERE activa=1 ORDER BY nombre").all();
   const r = calcularCumplimiento({ mes, tipos, evs, tecnicos, sedes });
-  const nCharlas = db.prepare("SELECT COUNT(*) n FROM consolidado_charlas WHERE substr(fecha,1,7)=?").get(mes).n;
-  const nEnc = db.prepare("SELECT COUNT(*) n, COALESCE(SUM(valor),0) v FROM consolidado_mensual WHERE periodo=? AND indicador='encuestas'").get(mes);
-  r.consolidado = { charla: nCharlas || null, encuesta_sg: nEnc.n ? nEnc.v : null };
+
+  const mensual = db.prepare("SELECT sede_id,sede_texto,periodo,indicador,valor FROM consolidado_mensual WHERE periodo=?").all(mes);
+  const actas = db.prepare("SELECT sede_id,sede_texto,codigo,fecha,estado FROM consolidado_actas WHERE substr(fecha,1,7)=?").all(mes);
+  const meta = (c) => tipos.find((t) => t.clave === c)?.meta ?? null;
+  r.hoy = hoy;
+  r.siau = calcularPorTecnico({
+    mes, hoy, tecnicos: todos, sedes, metas: { encuestas: meta("encuesta_sg"), charlas: meta("charla") },
+    asignaciones: db.prepare("SELECT tecnico_id,sede_id,desde,hasta FROM asignaciones").all(),
+    ausencias: db.prepare("SELECT tecnico_id,tipo,desde,hasta FROM ausencias").all(),
+    mensual: mensual.filter((m) => m.sede_id), actas: actas.filter((a) => a.sede_id),
+  });
+  const suma = (ind) => mensual.filter((m) => ind.includes(m.indicador)).reduce((t, m) => t + m.valor, 0);
+  const hay = (ind) => mensual.some((m) => ind.includes(m.indicador));
+  r.consolidado = { charla: hay(["charlas_usuarios", "charlas_funcionarios"]) ? suma(["charlas_usuarios", "charlas_funcionarios"]) : null, encuesta_sg: hay(["encuestas"]) ? suma(["encuestas"]) : null };
+
+  // Actas de buzón según el calendario del propio consolidado (no «cada viernes»: hay festivos)
+  const nombre = new Map(sedes.map((x) => [x.id, x.nombre]));
+  const vencidas = actas.filter((a) => a.fecha <= hoy);
+  r.actas_consolidado = actas.length ? {
+    codigos: [...new Set(vencidas.map((a) => a.codigo))].sort(),
+    entregadas: vencidas.filter((a) => a.estado === "entregado").length, esperadas: vencidas.length,
+    sedes_pendientes: [...new Set(vencidas.filter((a) => a.estado !== "entregado").map((a) => a.sede_id ?? a.sede_texto))]
+      .map((k) => ({ sede: nombre.get(k) ?? String(k), pendientes: vencidas.filter((a) => (a.sede_id ?? a.sede_texto) === k && a.estado !== "entregado").map((a) => ({ codigo: a.codigo, fecha: a.fecha, estado: a.estado })) }))
+      .sort((x, y) => x.sede.localeCompare(y.sede, "es")),
+  } : null;
+
+  // Acompañamiento LSC (intérprete): solo totales, sin datos de personas
+  const lsc = mensual.filter((m) => m.indicador.startsWith("lsc_"));
+  const porSede = new Map();
+  for (const m of lsc.filter((x) => x.indicador === "lsc_atenciones")) { const k = nombre.get(m.sede_id) ?? m.sede_texto; porSede.set(k, (porSede.get(k) ?? 0) + m.valor); }
+  r.lsc = lsc.length ? {
+    atenciones: lsc.filter((m) => m.indicador === "lsc_atenciones").reduce((t, m) => t + m.valor, 0),
+    actividades: lsc.filter((m) => m.indicador === "lsc_actividades").reduce((t, m) => t + m.valor, 0),
+    asistentes: lsc.filter((m) => m.indicador === "lsc_actividades_asistentes").reduce((t, m) => t + m.valor, 0),
+    sedes: porSede.size, por_sede: [...porSede].map(([sede, n]) => ({ sede, atenciones: n })).sort((x, y) => y.atenciones - x.atenciones).slice(0, 8),
+  } : null;
+  r.sin_reconocer = new Set([...mensual, ...actas].filter((x) => !x.sede_id).map((x) => x.sede_texto)).size;
   r.sincronizado = db.prepare("SELECT creado FROM sincronizaciones ORDER BY id DESC LIMIT 1").get()?.creado ?? null;
   return r;
 }
@@ -199,7 +295,7 @@ async function api(req, res, url) {
   // ----- Lectura (visor)
   if (m === "GET" && p === "/api/config") { exigirVisor(req); return json(res, config()); }
   if (m === "GET" && p === "/api/evidencias") { exigirVisor(req); return json(res, listarEvidencias(q)); }
-  if (m === "GET" && p === "/api/cumplimiento") { exigirVisor(req); return json(res, cumplimiento(q.get("mes") ?? new Date().toISOString().slice(0, 7))); }
+  if (m === "GET" && p === "/api/cumplimiento") { exigirVisor(req); return json(res, cumplimiento(q.get("mes") ?? hoyLocal().slice(0, 7), q.get("hoy") ?? undefined)); }
   if (m === "GET" && p === "/api/verificacion") {
     exigirVisor(req);
     const v = db.prepare("SELECT periodo, creado, resumen FROM verificaciones ORDER BY id DESC LIMIT 1").get();
@@ -268,6 +364,45 @@ async function api(req, res, url) {
     db.prepare("UPDATE sedes SET nombre=COALESCE(?,nombre), activa=COALESCE(?,activa) WHERE id=?").run(b.nombre ? txt(b.nombre, 120) : null, b.activa == null ? null : Number(Boolean(b.activa)), Number(r[1]));
     return json(res, { ok: true });
   }
+  if (m === "GET" && p === "/api/admin/personal") {
+    const mes = q.get("mes") ?? hoyLocal().slice(0, 7);
+    if (!mesValido(mes)) throw bad("Mes inválido");
+    const fin = `${mes}-${String(ultimoDiaMes(mes)).padStart(2, "0")}`;
+    const tecnicos = db.prepare("SELECT id,nombre,rol,activo FROM tecnicos ORDER BY rol, nombre").all().map((t) => ({
+      ...t,
+      asignaciones: db.prepare("SELECT a.id,a.sede_id,s.nombre sede,a.desde,a.hasta,a.origen FROM asignaciones a JOIN sedes s ON s.id=a.sede_id WHERE a.tecnico_id=? AND a.desde<=? AND (a.hasta IS NULL OR a.hasta>=?) ORDER BY s.nombre").all(t.id, fin, `${mes}-01`),
+      ausencias: db.prepare("SELECT id,tipo,desde,hasta,nota,origen FROM ausencias WHERE tecnico_id=? AND desde<=? AND hasta>=? ORDER BY desde").all(t.id, fin, `${mes}-01`),
+    }));
+    const c = cumplimiento(mes);
+    const sinReconocer = db.prepare(`SELECT sede_texto t, COUNT(*) n FROM (SELECT sede_texto FROM consolidado_mensual WHERE sede_id IS NULL UNION ALL SELECT sede_texto FROM consolidado_actas WHERE sede_id IS NULL UNION ALL SELECT sede_texto FROM consolidado_charlas WHERE sede_id IS NULL) GROUP BY sede_texto ORDER BY n DESC`).all();
+    return json(res, { mes, tecnicos, sin_cobertura: c.siau.sin_cobertura, sin_reconocer: sinReconocer });
+  }
+  if (m === "POST" && p === "/api/admin/asignaciones") {
+    const b = await leerJson(req);
+    const t = entero(b.tecnico_id, 1, 1e9), sd = entero(b.sede_id, 1, 1e9);
+    if (!fechaValida(b.desde) || (b.hasta && !fechaValida(b.hasta)) || (b.hasta && b.hasta < b.desde)) throw bad("Fechas inválidas");
+    if (!db.prepare("SELECT 1 FROM tecnicos WHERE id=?").get(t) || !db.prepare("SELECT 1 FROM sedes WHERE id=?").get(sd)) throw bad("Técnico o sede inexistente");
+    const id = Number(db.prepare("INSERT INTO asignaciones(tecnico_id,sede_id,desde,hasta) VALUES (?,?,?,?)").run(t, sd, b.desde, b.hasta || null).lastInsertRowid);
+    return json(res, { id }, 201);
+  }
+  if ((r = /^\/api\/admin\/asignaciones\/(\d+)$/.exec(p)) && m === "DELETE") { db.prepare("DELETE FROM asignaciones WHERE id=?").run(Number(r[1])); return json(res, { ok: true }); }
+  if (m === "POST" && p === "/api/admin/ausencias") {
+    const b = await leerJson(req);
+    const t = entero(b.tecnico_id, 1, 1e9);
+    if (!["vacaciones", "licencia", "incapacidad", "otro"].includes(b.tipo)) throw bad("Tipo de ausencia inválido");
+    if (!fechaValida(b.desde) || !fechaValida(b.hasta) || b.hasta < b.desde) throw bad("Fechas inválidas");
+    if (!db.prepare("SELECT 1 FROM tecnicos WHERE id=?").get(t)) throw bad("Técnico inexistente");
+    const id = Number(db.prepare("INSERT INTO ausencias(tecnico_id,tipo,desde,hasta,nota) VALUES (?,?,?,?,?)").run(t, b.tipo, b.desde, b.hasta, txt(b.nota, 200)).lastInsertRowid);
+    return json(res, { id }, 201);
+  }
+  if ((r = /^\/api\/admin\/ausencias\/(\d+)$/.exec(p)) && m === "DELETE") { db.prepare("DELETE FROM ausencias WHERE id=?").run(Number(r[1])); return json(res, { ok: true }); }
+  if ((r = /^\/api\/admin\/sedes\/(\d+)\/alias$/.exec(p)) && m === "POST") {
+    const b = await leerJson(req), sede = db.prepare("SELECT id,alias FROM sedes WHERE id=?").get(Number(r[1]));
+    if (!sede) throw new HttpError(404, "No existe");
+    const t = txt(b.texto, 150, true);
+    db.prepare("UPDATE sedes SET alias=? WHERE id=?").run(JSON.stringify([...new Set([...(sede.alias ? JSON.parse(sede.alias) : []), t])]), sede.id);
+    return json(res, { ok: true, reasignadas: reasignarSedes() });
+  }
   if (m === "POST" && p === "/api/admin/tecnicos") {
     const b = await leerJson(req);
     const sede = b.sede_id ? entero(b.sede_id, 1, 1e9) : null;
@@ -276,7 +411,7 @@ async function api(req, res, url) {
   }
   if ((r = /^\/api\/admin\/tecnicos\/(\d+)$/.exec(p)) && m === "PUT") {
     const b = await leerJson(req);
-    db.prepare("UPDATE tecnicos SET nombre=COALESCE(?,nombre), activo=COALESCE(?,activo) WHERE id=?").run(b.nombre ? txt(b.nombre, 120) : null, b.activo == null ? null : Number(Boolean(b.activo)), Number(r[1]));
+    db.prepare("UPDATE tecnicos SET nombre=COALESCE(?,nombre), clave=COALESCE(?,clave), activo=COALESCE(?,activo), rol=COALESCE(?,rol) WHERE id=?").run(b.nombre ? txt(b.nombre, 120) : null, b.nombre ? normalizar(String(b.nombre)) : null, b.activo == null ? null : Number(Boolean(b.activo)), ["tecnico", "interprete", "administrativo"].includes(b.rol) ? b.rol : null, Number(r[1]));
     return json(res, { ok: true });
   }
   if ((r = /^\/api\/admin\/tipos\/([a-z_]+)$/.exec(p)) && m === "PUT") {

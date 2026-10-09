@@ -5,7 +5,7 @@ import { spawn } from "node:child_process";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { CATALOGO, crearResolver } from "../sedes.mjs";
+import { CATALOGO, aliasDe, crearResolver } from "../sedes.mjs";
 import { entero, fecha, parsearRecoleccion, parsearSocializaciones } from "../consolidados.mjs";
 
 const RECOLECCION = JSON.parse(readFileSync(new URL("./fixtures/recoleccion.json", import.meta.url)));
@@ -19,7 +19,7 @@ const SOCIALIZACIONES = [
   ["sin fecha", "", "", "PAS001", "Paso Barlovento", "Tema", "Usuarios", "5", "Ana Pérez", ""],
 ];
 
-const sedesDb = () => CATALOGO.map(([nombre, tipo, codigo, largo], i) => ({ id: i + 1, nombre, tipo, codigo, alias: largo ? JSON.stringify([largo]) : null }));
+const sedesDb = () => CATALOGO.map(([nombre, tipo, codigo, largo], i) => ({ id: i + 1, nombre, tipo, codigo, alias: aliasDe(nombre, largo).length ? JSON.stringify(aliasDe(nombre, largo)) : null }));
 
 test("catálogo: 40 sedes (12 Camino + 28 Paso), 37 con código del consolidado", () => {
   assert.equal(CATALOGO.length, 40);
@@ -68,18 +68,18 @@ test("recolección: lee los bloques reales de la plantilla (satisfacción, manif
   assert.deepEqual(r.sedes, ["C. LA PLAYA", "P. FERRY", "P. SIERRITA"]);
   assert.deepEqual(r.avisos, []);
   const f = (sede, periodo, ind) => r.filas.find((x) => x.sede_texto === sede && x.periodo === periodo && x.indicador === ind)?.valor;
-  assert.equal(f("C. LA PLAYA", "2026-05", "encuestas"), 91);
-  assert.equal(f("C. LA PLAYA", "2026-05", "satisfechos"), 90);
-  assert.equal(f("C. LA PLAYA", "2026-05", "trazadora"), 89);
-  assert.equal(f("C. LA PLAYA", "2026-06", "encuestas"), 1200);
-  assert.equal(f("P. FERRY", "2026-05", "encuestas"), 50); // bloque derecho
-  assert.equal(f("P. SIERRITA", "2026-05", "encuestas"), 40); // segunda banda, bloque izquierdo
-  assert.equal(f("C. LA PLAYA", "2026-05", "felicitaciones"), 69);
-  assert.equal(f("C. LA PLAYA", "2026-05", "quejas"), 6);
-  assert.equal(f("C. LA PLAYA", "2026-05", "asistentes_usuarios"), 297);
-  assert.equal(f("C. LA PLAYA", "2026-05", "asistentes_funcionarios"), 10);
-  assert.equal(f("P. FERRY", "2026-05", "asistentes_usuarios"), 120);
-  assert.equal(f("P. FERRY", "2026-06", "encuestas"), undefined); // celdas vacías no generan filas
+  assert.equal(f("C. LA PLAYA", "2026-05", "rec_encuestas"), 91);
+  assert.equal(f("C. LA PLAYA", "2026-05", "rec_satisfechos"), 90);
+  assert.equal(f("C. LA PLAYA", "2026-05", "rec_trazadora"), 89);
+  assert.equal(f("C. LA PLAYA", "2026-06", "rec_encuestas"), 1200);
+  assert.equal(f("P. FERRY", "2026-05", "rec_encuestas"), 50); // bloque derecho
+  assert.equal(f("P. SIERRITA", "2026-05", "rec_encuestas"), 40); // segunda banda, bloque izquierdo
+  assert.equal(f("C. LA PLAYA", "2026-05", "rec_felicitaciones"), 69);
+  assert.equal(f("C. LA PLAYA", "2026-05", "rec_quejas"), 6);
+  assert.equal(f("C. LA PLAYA", "2026-05", "rec_asistentes_usuarios"), 297);
+  assert.equal(f("C. LA PLAYA", "2026-05", "rec_asistentes_funcionarios"), 10);
+  assert.equal(f("P. FERRY", "2026-05", "rec_asistentes_usuarios"), 120);
+  assert.equal(f("P. FERRY", "2026-06", "rec_encuestas"), undefined); // celdas vacías no generan filas
 });
 
 test("recolección: si la plantilla cambió de forma, avisa en vez de leer celdas equivocadas", () => {
@@ -118,11 +118,22 @@ test("enlace de punta a punta: sincroniza, no duplica y alimenta el cumplimiento
       assert.deepEqual(b.sedes_no_reconocidas, []);
     }
     const c = await (await fetch(base + "/api/cumplimiento?mes=2026-05")).json();
-    assert.equal(c.consolidado.charla, 3); // no se duplicó tras sincronizar dos veces
-    assert.equal(c.consolidado.encuesta_sg, 91 + 50 + 40);
     assert.ok(c.sincronizado);
-    const j = await (await fetch(base + "/api/cumplimiento?mes=2026-01")).json();
-    assert.equal(j.consolidado.charla, null);
+    assert.equal(c.consolidado.encuesta_sg, null); // la recolección manual no se mezcla con las encuestas reales
     assert.equal((await post(base, { tipo: "otro", archivo_id: "Z" })).status, 400);
   });
+});
+
+test("resolver: todas las variantes de sede vistas en los archivos reales apuntan a la sede correcta", () => {
+  const r = crearResolver(sedesDb());
+  const casos = {
+    "C. CUIDADELA 20 DE JULIO": "C. CIUDADELA", "C. PLAYA": "C. LA PLAYA", "C. SALUDMETROPOLITANA": "C. SALUD METROPOLITANA", "CAMINO SALUD METROPOLITANO": "C. SALUD METROPOLITANA",
+    "P. EL FERRY": "P. FERRY", "P. LAS MALVINA": "P. LAS MALVINAS", "PASO MALVINAS": "P. LAS MALVINAS", "P. PRADERA": "P. LA PRADERA", "P. VILLANUEVA": "P. VILLA NUEVA",
+    "C. NUEVO DE BARRANQUILLA": "C. NUEVO BARRANQUILLA", "P. NIEVES": "P. LAS NIEVES", "P. VILLA DE SAN PABLO": "P. VILLA SAN PABLO", "PASO VILLAS DE SANPABLO": "P. VILLA SAN PABLO",
+    "PASO PALMAS": "P. LAS PALMAS", "P. PALMAS": "P. LAS PALMAS", "PASO FLORES": "P. LAS FLORES", "LA ESMERALDA LIPAYA": "P. ESMERALDA LIPAYA", "P. LA 21 MICHELLE": "P. LA 21",
+    "CIUDADELA20DEJULIO": "C. CIUDADELA", "PASOLAVILLA": "P. LA VILLA", "CAMINO LA MANGA": "C. LA MANGA", "CAMINO NAZARETH": "C. NAZARETH", "NUEVA VIDA": "P. NUEVA VIDA",
+    "CAMINOUNIVERSITARIODISTRITALADELITADECHA": "C. ADELITA DE CHAR", "Paso San Jose": "P. SAN JOSE", "P. Carlos Meisel": "P. CARLOS MEISEL", "B. ESPERANZA": "P. BUENA ESPERANZA", "SANTO DOMINGO": "P. SANTO DOMINGO",
+  };
+  for (const [texto, esperado] of Object.entries(casos)) assert.equal(r(texto)?.nombre, esperado, texto);
+  for (const dudoso of ["HOSPITAL GENERAL DE BARRANQUILLA", "INTERPRETE", "TOTAL", "CARRIZAL I", "LA UNION SAN JOSE"]) assert.equal(r(dudoso), null, dudoso);
 });

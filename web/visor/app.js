@@ -47,19 +47,24 @@ function render() {
   tg.titulo.textContent = "Evidencias " + (S.area === "siau" ? S.cfg.marca.nombre_siau : S.cfg.marca.nombre_asociacion);
   document.querySelector(".nav-titulo").textContent = tg.titulo.textContent;
 
-  const vistas = S.area === "siau" ? [["cumplimiento", "Cumplimiento"], ["evidencias", "Muestras"]] : [["evidencias", "Muestras"]];
+  const vistas = S.area === "siau" ? [["cumplimiento", "Cumplimiento"], ["evidencias", "Muestras"], ["ludoteca", "Ludoteca"]] : [["evidencias", "Muestras"]];
   seg.hidden = vistas.length < 2;
   seg.style.setProperty("--n", vistas.length);
   seg.style.setProperty("--i", Math.max(0, vistas.findIndex(([v]) => v === S.vista)));
   seg.replaceChildren(segThumb, ...vistas.map(([v, n]) => h("button", { role: "tab", "aria-selected": v === S.vista, onclick: () => { if (S.vista !== v) { S.vista = v; render(); } } }, n)));
   cont.className = "entra";
   cont.replaceChildren();
-  (S.vista === "cumplimiento" ? vistaCumplimiento : vistaEvidencias)(cont);
+  ({ cumplimiento: vistaCumplimiento, evidencias: vistaEvidencias, ludoteca: vistaLudoteca }[S.vista])(cont);
 }
 
-const sec = (n, titulo, ...extra) => h("div", { class: "sec" }, h("span", { class: "n" }, "§" + n), h("h2", {}, titulo), ...extra);
+const sec = (n, titulo, ...extra) => h("div", { class: "encab" }, h("span", { class: "n" }, "§" + n), h("h2", {}, titulo), ...extra);
 
-// ---------- Cumplimiento (solo SIAU)
+// ---------- Cumplimiento individual por SIAU
+const clase = (p) => (p >= 100 ? "" : p >= 60 ? "mid" : "low");
+const pctDe = (t, m) => (m > 0 ? Math.min(100, Math.round((t / m) * 100)) : 100);
+const medidor = (m) => { const p = pctDe(m.valor, m.meta); return h("div", { class: "celda-meta" }, h("span", { class: "num" }, m.meta == null ? String(m.valor) : `${m.valor} / ${m.meta}`),
+  m.meta ? h("div", { class: "gauge " + clase(p), role: "img", "aria-label": `${p}% de la meta` }, h("i", { style: `transform:scaleX(${p / 100})` })) : ""); };
+
 async function vistaCumplimiento(c) {
   const mes = h("input", { type: "month", value: S.mes, "aria-label": "Mes", onchange: () => { S.mes = mes.value || mesActual(); render(); } });
   c.append(h("p", { class: "mut" }, "Cargando…"));
@@ -67,49 +72,59 @@ async function vistaCumplimiento(c) {
   try { [d, ver] = await Promise.all([api("/api/cumplimiento?mes=" + S.mes), api("/api/verificacion")]); }
   catch (e) { return c.replaceChildren(h("div", { class: "msg err" }, e.message)); }
 
-  const clase = (p) => (p >= 100 ? "" : p >= 60 ? "mid" : "low");
-  const pctDe = (t, m) => Math.min(100, Math.round((t / m) * 100));
-  const gauge = (t, m) => { const p = pctDe(t, m); return h("div", { class: "gauge " + clase(p), role: "img", "aria-label": `${p}% de la meta` }, h("i", { style: `transform:scaleX(${p / 100})` })); };
-
-  const oficial = (t) => d.consolidado?.[t.clave] ?? null;
-  const total = (t) => oficial(t) ?? t.total;
-  const conMeta = d.tipos.filter((t) => t.meta);
-  const pcts = conMeta.map((t) => t.alcance === "tecnico" && t.porTecnico.length ? t.porTecnico.reduce((s, x) => s + pctDe(x.total, t.meta), 0) / t.porTecnico.length : pctDe(total(t), t.meta));
-  const prom = pcts.length ? Math.round(pcts.reduce((a, b) => a + b, 0) / pcts.length) : null;
-  const alDia = d.actas.filter((a) => !a.faltantes.length).length;
-  const titulo = prom == null ? "Aún no hay metas configuradas." : prom >= 100 ? "¡Metas del mes cumplidas!" : `Llevamos ${prom}% de las metas de ${mesLegible(d.mes)}.`;
-  const detalle = [...conMeta.map((t) => `${t.nombre.split(" ")[0]} ${total(t)}/${t.meta}`), d.actas.length && `Actas al día ${alDia}/${d.actas.length} sedes`].filter(Boolean).join(" · ");
-
-  const pose = prom == null ? "siau" : prom >= 100 ? "pulgar" : prom < 60 ? "dardo" : "siau";
+  const filas = d.siau.tecnicos, evaluados = filas.filter((t) => !t.ausente);
+  const cumplen = evaluados.filter((t) => t.encuestas.cumple !== false && t.charlas.cumple !== false).length;
+  const frac = evaluados.length ? cumplen / evaluados.length : null;
+  const pose = frac == null ? "siau" : frac >= 1 ? "pulgar" : frac < 0.6 ? "dardo" : "siau";
+  const metaEnc = filas.find((t) => t.encuestas.meta)?.encuestas.meta, metaCh = filas.find((t) => t.charlas.meta)?.charlas.meta;
+  const titulo = frac == null ? "Aún no hay personal o consolidados cargados para este mes." : frac >= 1 ? `¡Los ${evaluados.length} SIAU cumplen sus metas de ${mesLegible(d.mes)}!` : `${cumplen} de ${evaluados.length} SIAU cumplen sus metas mínimas de ${mesLegible(d.mes)}.`;
+  const detalle = [`Meta mensual por SIAU: ${metaEnc ?? 90} encuestas · ${metaCh ?? 200} charlas`, d.siau.sin_cobertura.length && `${d.siau.sin_cobertura.length} sede(s) sin SIAU`].filter(Boolean).join(" · ");
   const hero = h("div", { class: "hero" }, mascota(pose), h("div", { class: "card glass globo" }, h("div", { class: "titulo" }, titulo), h("div", { class: "detalle" }, detalle)));
 
-  const metas = h("div", { class: "grid" }, conMeta.map((t, i) => h("div", { class: "card", style: delay(i) },
-    h("div", { class: "mut" }, t.nombre),
-    h("div", { class: "big", style: "margin-top:6px" }, String(total(t)), " ", h("small", {}, `/ ${t.meta} ${t.alcance === "tecnico" ? "por técnico" : "al mes"}`)),
-    t.alcance === "global" ? [gauge(total(t), t.meta), h("div", { class: "pct" }, h("span", {}, "0"), h("span", {}, pctDe(total(t), t.meta) + "%"), h("span", {}, String(t.meta)))] : "",
-    oficial(t) != null ? h("div", { class: "leyenda" }, "Fuente: consolidado oficial · con evidencia fotográfica: ", h("b", {}, String(t.total))) : "")));
+  const nombreCorto = (n) => n.split(/\s+/).filter(Boolean).map((x) => x[0] + x.slice(1).toLowerCase()).join(" ");
+  const tabla = filas.length ? h("div", { class: "card scroll" }, h("table", { class: "cient" },
+    h("thead", {}, h("tr", {}, ["SIAU", "Días", "Encuestas", "Charlas", "NPS", "Actas"].map((t) => h("th", {}, t)))),
+    h("tbody", {}, filas.map((t) => h("tr", { class: t.ausente ? "ausente" : "" },
+      h("td", {}, h("div", { style: "font-weight:800" }, nombreCorto(t.nombre)), h("div", { class: "mut" }, t.sedes.length ? t.sedes.join(" · ") : "Sin sedes asignadas")),
+      h("td", { class: "num" }, t.ausente ? h("span", { class: "badge" }, t.ausencias[0]?.tipo ?? "ausente") : `${t.dias_activos}/${t.dias_mes}`, t.ausencias.length && !t.ausente ? h("div", { class: "mut" }, t.ausencias.map((a) => a.tipo).join(", ")) : ""),
+      h("td", {}, t.ausente ? "—" : medidor(t.encuestas)), h("td", {}, t.ausente ? "—" : medidor(t.charlas)),
+      h("td", { class: "num" }, t.nps == null ? "—" : String(t.nps)),
+      h("td", { class: "num", title: t.actas.pendientes.map((p) => `${p.sede} · ${p.codigo}`).join("\n") }, t.actas.esperadas ? `${t.actas.entregadas}/${t.actas.esperadas}` : "—", t.actas.pendientes.length ? h("div", { class: "mut" }, `${t.actas.pendientes.length} pendiente(s)`) : ""))))))
+    : h("div", { class: "card vacio" }, mascota("manos", 120), "Sin personal cargado: el horario se sincroniza con el script, o agréguelo en Administrador → Personal.");
 
-  const tecnicos = d.tipos[0]?.porTecnico ?? [];
-  const tabla = tecnicos.length ? h("div", { class: "card scroll" }, h("table", { class: "cient" },
-    h("thead", {}, h("tr", {}, h("th", {}, "Técnico"), d.tipos.map((t) => h("th", {}, t.nombre)))),
-    h("tbody", {}, tecnicos.map((tc, i) => h("tr", {}, h("td", {}, tc.nombre), d.tipos.map((t) => {
-      const v = t.porTecnico[i].total;
-      return h("td", { class: "num" }, t.meta && t.alcance === "tecnico" ? [`${v}/${t.meta}`, gauge(v, t.meta)] : String(v));
-    })))))) : h("p", { class: "mut" }, "Aún no hay técnicos registrados.");
+  const sinCob = d.siau.sin_cobertura.length ? h("div", { class: "card" }, h("div", { class: "mut", style: "margin-bottom:8px" }, `${d.siau.sin_cobertura.length} sede(s) este mes sin un SIAU que las atienda:`),
+    h("div", { class: "chips" }, d.siau.sin_cobertura.map((x) => h("span", { class: "chip-sede", title: x.motivo }, x.sede)))) : "";
 
-  const incompletas = d.actas.filter((a) => a.faltantes.length);
-  const actas = h("div", { class: "card scroll" },
-    h("p", { class: "mut", style: "margin:0 0 8px" }, d.actas.length ? `${alDia} de ${d.actas.length} sedes al día. Viernes del mes: ${d.viernes.length}.` : "Sin sedes registradas."),
-    incompletas.length ? h("table", { class: "cient" }, h("thead", {}, h("tr", {}, h("th", {}, "Sede"), h("th", {}, "Entregadas"), h("th", {}, "Faltan (viernes)"))),
-      h("tbody", {}, incompletas.map((a) => h("tr", {}, h("td", {}, a.nombre), h("td", { class: "num" }, `${a.entregadas}/${a.esperadas}`), h("td", { class: "num" }, a.faltantes.map((f) => fmtFecha(f)).join(", "))))) ) : "");
+  const ac = d.actas_consolidado;
+  const actas = ac ? h("div", { class: "card scroll" },
+    h("p", { class: "mut", style: "margin:0 0 8px" }, `${ac.entregadas} de ${ac.esperadas} actas entregadas hasta hoy (${ac.codigos.join(", ") || "—"}). El calendario sale del propio consolidado.`),
+    ac.sedes_pendientes.length ? h("table", { class: "cient" }, h("thead", {}, h("tr", {}, h("th", {}, "Sede"), h("th", {}, "Actas pendientes"))),
+      h("tbody", {}, ac.sedes_pendientes.map((x) => h("tr", {}, h("td", {}, x.sede), h("td", { class: "num" }, x.pendientes.map((p) => `${p.codigo} (${fmtFecha(p.fecha)})`).join(", ")))))) : h("p", {}, "Todas las sedes están al día."))
+    : h("div", { class: "card" }, h("p", { class: "mut" }, "Aún no se ha sincronizado el consolidado de buzón."));
 
-  const bot = ver ? h("p", { class: "leyenda" }, `Verificación automática del consolidado en Drive · periodo ${ver.periodo} · ${ver.creado} UTC · `, h("b", {}, ver.resumen.hallazgos?.length ? `${ver.resumen.hallazgos.length} hallazgo(s)` : "sin hallazgos")) : "";
+  const l = d.lsc;
+  const lsc = l ? h("div", { class: "grid" },
+    h("div", { class: "card" }, h("div", { class: "mut" }, "Atenciones con intérprete"), h("div", { class: "big", style: "margin-top:6px" }, String(l.atenciones))),
+    h("div", { class: "card" }, h("div", { class: "mut" }, "Actividades LSC"), h("div", { class: "big", style: "margin-top:6px" }, String(l.actividades), " ", h("small", {}, `${l.asistentes} asistentes`))),
+    h("div", { class: "card" }, h("div", { class: "mut" }, "Sedes atendidas"), h("div", { class: "big", style: "margin-top:6px" }, String(l.sedes)), l.por_sede.length ? h("div", { class: "leyenda" }, l.por_sede.slice(0, 3).map((x) => `${x.sede} ${x.atenciones}`).join(" · ")) : "")) : h("div", { class: "card" }, h("p", { class: "mut" }, "Sin registros de acompañamiento LSC para este mes."));
 
-  c.replaceChildren(hero,
-    h("div", { class: "filters" }, h("label", { style: "margin:0" }, "Periodo de observación"), mes),
-    sec(1, "Metas del mes"), metas, h("p", { class: "leyenda" }, h("b", {}, "Fig. 1."), " Avance acumulado frente a la meta; las marcas del instrumento están cada 10 %.", d.sincronizado ? ` Consolidados sincronizados: ${d.sincronizado} UTC.` : ""),
-    sec(2, "Avance por técnico"), tabla, h("p", { class: "leyenda" }, h("b", {}, "Tabla 1."), " Actividades registradas por técnico durante el periodo."),
-    sec(3, "Actas de buzón"), actas, h("p", { class: "leyenda" }, h("b", {}, "Tabla 2."), " Sedes con actas pendientes (una por viernes)."), bot);
+  const avisos = [d.sin_reconocer ? h("div", { class: "msg err" }, `${d.sin_reconocer} nombre(s) de sede de los consolidados no se reconocieron; no se están contando. Corríjalos en Administrador → Personal y rotación.`) : "",
+    d.sincronizado ? h("p", { class: "leyenda" }, `Consolidados sincronizados: ${d.sincronizado} UTC.`) : ""];
+  const bot = ver ? h("p", { class: "leyenda" }, `Verificación del consolidado en Drive · periodo ${ver.periodo} · `, h("b", {}, ver.resumen.hallazgos?.length ? `${ver.resumen.hallazgos.length} hallazgo(s)` : "sin hallazgos")) : "";
+
+  c.replaceChildren(hero, h("div", { class: "filters" }, h("label", { style: "margin:0" }, "Periodo de observación"), mes), ...avisos,
+    sec(1, "Cumplimiento por SIAU"), tabla, h("p", { class: "leyenda" }, h("b", {}, "Tabla 1."), " Metas mínimas por SIAU. Lo registrado en cada sede se reparte entre quienes la atienden; la meta baja en proporción a los días de vacaciones o licencia."),
+    ...(sinCob ? [sec(2, "Sedes sin cobertura"), sinCob] : []),
+    sec(sinCob ? 3 : 2, "Actas de buzón"), actas, h("p", { class: "leyenda" }, h("b", {}, "Tabla 2."), " Actas de apertura de buzón vencidas y no entregadas."),
+    sec(sinCob ? 4 : 3, "Acompañamiento LSC (intérprete)"), lsc, bot);
+}
+
+// ---------- Ludoteca (en construcción)
+function vistaLudoteca(c) {
+  c.append(sec(1, "Ludoteca"), h("div", { class: "card vacio", style: "flex-direction:column;text-align:center" },
+    mascota("atento", 190), h("h2", {}, "En construcción"),
+    h("p", { class: "mut", style: "max-width:52ch" }, "Aquí se mostrarán las actividades de ludoteca por mes, los niños y niñas atendidos, las encuestas aplicadas y las evidencias fotográficas. La fuente prevista es la hoja LUDOTECA del registro del intérprete."),
+    h("img", { src: "/shared/marca/ludoteca.png", alt: "Proyecto Ludoteca", style: "max-height:90px;max-width:80%" })));
 }
 
 // ---------- Muestras (galería)

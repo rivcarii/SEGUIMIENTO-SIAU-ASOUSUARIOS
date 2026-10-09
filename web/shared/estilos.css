@@ -60,9 +60,9 @@ main{width:100%;max-width:1120px;margin:0 auto;padding:8px 16px 24px;flex:1}
 .tabbar .thumb{background:rgba(6,93,126,.13);box-shadow:inset 0 0 0 .5px rgba(6,93,126,.18)}
 
 /* Cuaderno: secciones numeradas, leyendas, tablas con reglas */
-.sec{display:flex;align-items:center;gap:10px;margin:30px 0 12px}
-.sec .n{font:800 12px var(--mono);color:#fff;background:var(--pri);border-radius:8px;padding:3px 8px}
-.sec h2{font-size:21px}
+.encab{display:flex;align-items:center;gap:10px;margin:30px 0 12px}
+.encab .n{font:800 12px var(--mono);color:#fff;background:var(--pri);border-radius:8px;padding:3px 8px}
+.encab h2{font-size:21px}
 .leyenda{font:12px var(--mono);color:var(--mut);margin:8px 2px 0}
 .leyenda b{color:var(--tx)}
 .mut{color:var(--mut);font-size:14px}
@@ -165,3 +165,13 @@ input[type=file]::file-selector-button{font:800 14px var(--fuente);color:var(--p
 .vigilancia .chip img{height:26px;width:auto;display:block}
 @media(max-width:600px){.pie-in{justify-content:center}.pie-txt{display:none}}
 .tabbar{background:rgba(255,255,255,.84)}
+
+tr.ausente td{opacity:.55}
+.celda-meta{min-width:130px}
+.celda-meta .gauge{height:8px;margin-top:4px}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip-sede{background:rgba(226,10,49,.1);color:var(--bad);border-radius:999px;padding:2px 10px;font-size:13px;font-weight:700}
+.seg{max-width:520px}
+.chip-sede{display:inline-flex;align-items:center;gap:6px}
+.chip-sede .btn{padding:0 7px;min-height:0;line-height:1.5;font-size:15px;box-shadow:none;background:transparent}
+.chip-sede{white-space:nowrap}

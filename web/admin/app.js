@@ -1,4 +1,4 @@
-import { api, h, fechaHoy, fmtFecha, opciones, pintarMarca, mascota, tituloGrande } from "/shared/comun.js";
+import { api, h, fechaHoy, fmtFecha, mesActual, opciones, pintarMarca, mascota, tituloGrande } from "/shared/comun.js";
 
 const app = document.getElementById("app"), salir = document.getElementById("salir");
 let cfg, seccion = "nueva", titulo;
@@ -23,11 +23,11 @@ function login() {
   } }, h("h2", {}, "Acceso administrador"), h("label", {}, "Contraseña"), pw, msg, h("p", {}, h("button", { class: "btn" }, "Entrar")))));
 }
 
-const SECCIONES = [["nueva", "Nueva evidencia"], ["lista", "Evidencias"], ["catalogos", "Sedes y técnicos"], ["metas", "Metas"], ["marca", "Logos"]];
+const SECCIONES = [["nueva", "Nueva evidencia"], ["lista", "Evidencias"], ["personal", "Personal y rotación"], ["catalogos", "Sedes y técnicos"], ["metas", "Metas"], ["marca", "Logos"]];
 function render() {
   const cont = h("div");
   app.replaceChildren(titulo.el, h("nav", { class: "tabs glass" }, SECCIONES.map(([k, n]) => h("button", { "aria-pressed": k === seccion, onclick: () => { seccion = k; render(); } }, n))), cont);
-  ({ nueva: formEvidencia, lista: listaEvidencias, catalogos, metas, marca })[seccion](cont);
+  ({ nueva: formEvidencia, lista: listaEvidencias, personal, catalogos, metas, marca })[seccion](cont);
 }
 
 // ---- reducción de imagen en el navegador (fotos de celular pesan 5-10 MB)
@@ -134,6 +134,51 @@ function marca(cont) {
   cont.replaceChildren(msg, h("div", { class: "row" }, logo("siau", "Logo SIAU"), logo("asociacion", "Logo Asociación de Usuarios")),
     h("div", { class: "card", style: "margin-top:14px" }, h("h3", {}, "Nombres"), h("label", {}, "Nombre del módulo SIAU"), n1, h("label", {}, "Nombre del módulo Asociación"), n2,
       h("p", {}, h("button", { class: "btn", onclick: async () => { await api("/api/admin/marca", { method: "PUT", json: { nombre_siau: n1.value, nombre_asociacion: n2.value } }); cfg = await api("/api/config"); pintarMarca(cfg.marca); aviso(msg, true, "Guardado."); } }, "Guardar nombres"))));
+}
+
+// ---- Personal y rotación: sedes de cada SIAU por mes, vacaciones/licencias y nombres de sede sin reconocer
+let mesPersonal = mesActual();
+const ROLES = [["tecnico", "SIAU (se evalúa)"], ["interprete", "Intérprete LSC"], ["administrativo", "Administrativo (recopila)"]];
+const TIPOS_AUS = [["vacaciones", "Vacaciones"], ["licencia", "Licencia"], ["incapacidad", "Incapacidad"], ["otro", "Otro"]];
+
+async function personal(cont) {
+  const mes = h("input", { type: "month", value: mesPersonal, "aria-label": "Mes", onchange: () => { mesPersonal = mes.value || mesActual(); personal(cont); } });
+  let d;
+  try { d = await api("/api/admin/personal?mes=" + mesPersonal); } catch (e) { return cont.replaceChildren(h("div", { class: "msg err" }, e.message)); }
+  const msg = h("div"), recargar = () => personal(cont);
+  const llamar = (f) => async () => { try { await f(); recargar(); } catch (e) { aviso(msg, false, e.message); } };
+  const primero = `${mesPersonal}-01`;
+
+  const sinCob = d.sin_cobertura.length ? h("div", { class: "card" }, h("h3", {}, `Sedes sin SIAU este mes (${d.sin_cobertura.length})`), h("div", { class: "chips" }, d.sin_cobertura.map((x) => h("span", { class: "chip-sede", title: x.motivo }, x.sede))),
+    h("p", { class: "mut" }, "Asígnelas a un SIAU abajo (por ejemplo, para cubrir a quien está de vacaciones o licencia).")) : h("div", { class: "msg ok" }, "Todas las sedes tienen un SIAU asignado este mes.");
+
+  const sinRec = d.sin_reconocer.length ? h("div", { class: "card" }, h("h3", {}, "Nombres de sede sin reconocer"), h("p", { class: "mut" }, "Aparecen en los consolidados pero no coinciden con ninguna sede; no se están contando. Indique a qué sede corresponde cada uno (si no es una sede, déjelo)."),
+    ...d.sin_reconocer.map((x) => { const sel = h("select"); opciones(sel, cfg.sedes, "id", "nombre", "— elegir sede —"); return h("div", { class: "filters" }, h("strong", {}, x.t), h("span", { class: "mut" }, `${x.n} registro(s)`), sel,
+      h("button", { class: "btn sec", onclick: llamar(async () => { if (!sel.value) throw new Error("Elija una sede"); await api(`/api/admin/sedes/${sel.value}/alias`, { json: { texto: x.t } }); }) }, "Es esta sede")); })) : "";
+
+  const tarjeta = (t) => {
+    const rol = h("select", { onchange: llamar(() => api("/api/admin/tecnicos/" + t.id, { method: "PUT", json: { rol: rol.value } })) }, ROLES.map(([v, n]) => h("option", { value: v }, n))); rol.value = t.rol;
+    const sede = h("select"), desde = h("input", { type: "date", value: primero }), hasta = h("input", { type: "date", "aria-label": "Hasta (opcional)" });
+    opciones(sede, cfg.sedes.filter((x) => x.activa), "id", "nombre", "— sede —");
+    const tipo = h("select", {}, TIPOS_AUS.map(([v, n]) => h("option", { value: v }, n))), ad = h("input", { type: "date", value: primero }), ah = h("input", { type: "date", value: `${mesPersonal}-${String(new Date(+mesPersonal.slice(0, 4), +mesPersonal.slice(5), 0).getDate()).padStart(2, "0")}` }), nota = h("input", { type: "text", placeholder: "Nota (opcional)" });
+    return h("div", { class: "card", style: "margin-top:14px" + (t.activo ? "" : ";opacity:.6") },
+      h("div", { class: "filters" }, h("h3", { style: "margin:0;flex:1" }, t.nombre), rol,
+        h("button", { class: "btn sec", onclick: llamar(() => api("/api/admin/tecnicos/" + t.id, { method: "PUT", json: { activo: !t.activo } })) }, t.activo ? "Desactivar" : "Activar")),
+      t.rol === "tecnico" ? [
+        h("label", {}, `Sedes que atiende en ${mesPersonal}`),
+        h("div", { class: "chips" }, t.asignaciones.length ? t.asignaciones.map((a) => h("span", { class: "chip-sede", style: "background:rgba(6,93,126,.12);color:var(--azul)", title: `${a.desde} → ${a.hasta ?? "sin fecha de fin"} · ${a.origen}` }, h("span", {}, a.sede),
+          h("button", { class: "btn sec", style: "padding:0 8px;box-shadow:none", title: "Quitar", "aria-label": "Quitar " + a.sede, onclick: llamar(() => api("/api/admin/asignaciones/" + a.id, { method: "DELETE" })) }, "×"))) : h("span", { class: "mut" }, "Ninguna")),
+        h("div", { class: "filters", style: "margin-top:8px" }, sede, h("label", { style: "margin:0" }, "Desde"), desde, h("label", { style: "margin:0" }, "Hasta"), hasta,
+          h("button", { class: "btn", onclick: llamar(async () => { if (!sede.value) throw new Error("Elija una sede"); await api("/api/admin/asignaciones", { json: { tecnico_id: t.id, sede_id: sede.value, desde: desde.value, hasta: hasta.value } }); }) }, "Asignar sede")),
+        h("label", {}, "Vacaciones, licencias e incapacidades"),
+        t.ausencias.length ? h("table", {}, h("tbody", {}, t.ausencias.map((a) => h("tr", {}, h("td", {}, TIPOS_AUS.find(([v]) => v === a.tipo)?.[1] ?? a.tipo), h("td", {}, `${fmtFecha(a.desde)} → ${fmtFecha(a.hasta)}`), h("td", { class: "mut" }, a.nota), h("td", {},
+          h("button", { class: "btn sec", onclick: llamar(() => api("/api/admin/ausencias/" + a.id, { method: "DELETE" })) }, "Quitar"))))) ) : h("p", { class: "mut" }, "Sin ausencias este mes."),
+        h("div", { class: "filters", style: "margin-top:8px" }, tipo, ad, ah, nota,
+          h("button", { class: "btn", onclick: llamar(async () => { await api("/api/admin/ausencias", { json: { tecnico_id: t.id, tipo: tipo.value, desde: ad.value, hasta: ah.value, nota: nota.value } }); }) }, "Registrar ausencia")),
+      ] : h("p", { class: "mut" }, t.rol === "interprete" ? "El intérprete atiende todas las sedes; se muestra en «Acompañamiento LSC», no en el cumplimiento por SIAU." : "No se evalúa: recopila la información de los SIAU."));
+  };
+  cont.replaceChildren(msg, h("div", { class: "filters" }, h("label", { style: "margin:0" }, "Mes"), mes), h("p", { class: "mut" }, "El horario mensual carga automáticamente las sedes y las ausencias de cada SIAU. Lo que agregue aquí a mano no se borra al sincronizar; úselo para corregir rotaciones, coberturas, vacaciones y licencias. La meta de cada SIAU baja en proporción a sus días de ausencia."),
+    sinCob, sinRec, ...(d.tecnicos.length ? d.tecnicos.map(tarjeta) : [h("div", { class: "card vacio", style: "margin-top:14px" }, mascota("manos", 120), "Aún no hay personal. Se carga con el horario (script) o desde «Sedes y técnicos».")]));
 }
 
 iniciar();

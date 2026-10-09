@@ -44,22 +44,64 @@ export const CATALOGO = [
   ["P. VILLA SAN PABLO", "PASO", "PAS026", "Paso Villas de San Pablo"],
 ];
 
+// Variantes de escritura vistas en los consolidados, el horario y los formularios (solo errores de digitación y abreviaturas).
+export const ALIAS_EXTRA = {
+  "C. CIUDADELA": ["C. CUIDADELA 20 DE JULIO", "C. CIUDADELA 20 DE JULIO"],
+  "C. LA PLAYA": ["C. PLAYA", "CAMINO PLAYA"],
+  "C. SALUD METROPOLITANA": ["C. SALUDMETROPOLITANA", "C. SALUDMETROPOLITANO", "CAMINO SALUD METROPOLITANO"],
+  "C. NUEVO BARRANQUILLA": ["C. NUEVO DE BARRANQUILLA", "CAMINO NUEVO BQUILLA"],
+  "P. LAS MALVINAS": ["P. LAS MALVINA", "PASO MALVINAS", "MALVINAS"],
+  "P. FERRY": ["P. EL FERRY", "PASO EL FERRY"],
+  "P. LA PRADERA": ["P. PRADERA", "PRADERA"],
+  "P. VILLA NUEVA": ["P. VILLANUEVA"],
+  "P. LAS NIEVES": ["P. NIEVES", "PASO NIEVES"],
+  "P. VILLA SAN PABLO": ["P. VILLA DE SAN PABLO", "PASO VILLAS DE SANPABLO"],
+  "P. LAS PALMAS": ["P. PALMAS", "PASO PALMAS"],
+  "P. LAS FLORES": ["PASO FLORES"],
+  "P. BUENA ESPERANZA": ["B. ESPERANZA"],
+  "P. ESMERALDA LIPAYA": ["LA ESMERALDA LIPAYA", "ESMERALDA"],
+  "P. LA 21": ["P. LA 21 MICHELLE"],
+};
+
+/** Alias de una sede del catálogo: nombre largo del MAESTRO + variantes conocidas. */
+export const aliasDe = (nombre, largo) => [largo, ...(ALIAS_EXTRA[nombre] ?? [])].filter(Boolean);
+
 export const normalizar = (s) =>
   String(s ?? "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 
 const sinPrefijo = (n) => n.replace(/^(c|p|camino|paso) /, "");
+const sinArticulos = (n) => n.replace(/\b(el|la|las|los|de|del)\b/g, " ").replace(/\s+/g, " ").trim();
+const pegado = (n) => n.replace(/ /g, "");
 
-/** Devuelve resolver(texto) → fila de sede o null. Acepta nombre corto, nombre largo, código o el nombre sin prefijo (si es único). */
+/**
+ * resolver(texto) → fila de sede o null. Prueba, en orden: nombre/alias/código exacto, sin prefijo (C./P./Camino/Paso),
+ * sin artículos, escrito sin espacios («CIUDADELA20DEJULIO») y, por último, texto truncado (≥14 letras, si es único).
+ * Un nombre ambiguo no se resuelve: es mejor listarlo como «sin reconocer» que asignarlo a la sede equivocada.
+ */
 export function crearResolver(sedes) {
-  const exacto = new Map(), nucleo = new Map();
+  const niveles = [new Map(), new Map(), new Map(), new Map()], largos = [];
   const poner = (m, k, s) => { if (k) m.set(k, m.has(k) && m.get(k) !== s ? null : s); };
   for (const s of sedes) {
     const nombres = [s.nombre, s.codigo, ...(s.alias ? JSON.parse(s.alias) : [])];
-    for (const n of nombres) { poner(exacto, normalizar(n), s); poner(nucleo, sinPrefijo(normalizar(n)), s); }
+    for (const n0 of nombres) {
+      const n = normalizar(n0), core = sinPrefijo(n);
+      poner(niveles[0], n, s); poner(niveles[1], core, s); poner(niveles[2], sinArticulos(core), s);
+      poner(niveles[3], pegado(n), s); poner(niveles[3], pegado(core), s);
+      if (n) largos.push([pegado(n), s]);
+    }
   }
   return (texto) => {
     const n = normalizar(texto);
     if (!n) return null;
-    return exacto.get(n) ?? nucleo.get(sinPrefijo(n)) ?? null;
+    const core = sinPrefijo(n);
+    for (const [i, k] of [[0, n], [1, core], [2, sinArticulos(core)], [3, pegado(n)], [3, pegado(core)]]) {
+      if (niveles[i].has(k)) return niveles[i].get(k);
+    }
+    const q = pegado(n);
+    if (q.length >= 14) {
+      const c = new Set(largos.filter(([k]) => k.startsWith(q)).map(([, s]) => s));
+      if (c.size === 1) return [...c][0];
+    }
+    return null;
   };
 }
