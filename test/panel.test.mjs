@@ -100,3 +100,27 @@ test("actas de buzón: resumen por acta del calendario y sedes al día / con pen
   assert.deepEqual(a.al_dia, ["C. MURILLO", "P. LAS PALMAS"]);
   assert.deepEqual(a.sedes_pendientes.map((x) => x.sede), ["C. LA MANGA"]);
 });
+
+test("ficha de un SIAU: puesto, aporte por sede, serie de 6 meses y evidencias; rechaza ausentes e ids inválidos", async () => {
+  const { api, nucleo } = conDatosFicha();
+  const cfg = api("GET", "/api/config"), horacio = cfg.tecnicos.find((t) => t.nombre === "HORACIO AMARIS");
+  const f = api("GET", "/api/siau", { q: { id: horacio.id, mes: "2026-09" }, rol: "visor" });
+  assert.equal(f.serie.length, 6);
+  assert.equal(f.serie.at(-1).mes, "2026-09");
+  assert.deepEqual(f.fila.por_sede.map((s) => s.sede).sort(), ["C. MURILLO", "P. LAS PALMAS"]);
+  const murillo = f.fila.por_sede.find((s) => s.sede === "C. MURILLO");
+  assert.equal(murillo.nps, 45); assert.equal(murillo.charlas, 300); assert.equal(murillo.comparte, 0);
+  assert.equal(f.fila.por_sede.reduce((t, s) => t + s.nps + s.medica, 0), f.fila.encuestas.valor);
+  assert.equal(f.puesto.de, 15); assert.ok(f.puesto.n >= 1);
+  assert.ok(f.equipo.puntaje != null);
+  assert.equal(f.evidencias.total, 0);
+  await falla(() => api("GET", "/api/siau", { q: { id: "abc" }, rol: "visor" }), 400);
+  await falla(() => api("GET", "/api/siau", { q: { id: 99999, mes: "2026-09" }, rol: "visor" }), 404);
+  await falla(() => api("GET", "/api/siau", { q: { id: horacio.id, mes: "2026-09" }, rol: "nadie" }), 403);
+});
+function conDatosFicha() {
+  const x = nuevoNucleo({ rotacion: true });
+  x.nucleo.sincronizar({ tipo: "nps", archivo: "NPS", hojas: { "Respuestas de formulario 1": [["Marca temporal", "SEDE QUE CONSULTÓ:", "x", "probabilidad"], ...Array.from({ length: 45 }, (_, i) => [`0${1 + (i % 9)}/09/2026 10:00:00`, "C. MURILLO", "", "10"])] } });
+  x.nucleo.sincronizar({ tipo: "charlas_matriz", archivo: "CONS_CHARLAS_2026", anio: 2026, hojas: { "CHARLAS USUARIOS": [["x"], ["SEDES", "SEPTIEMBRE"], ["C. MURILLO", "300"]] } });
+  return x;
+}

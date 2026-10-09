@@ -24,6 +24,8 @@ export function vistaFototeca(c, S, { dlg, dlgc }) {
   const albumes = h("div", { class: "albumes", role: "tablist", "aria-label": "Álbumes" },
     ...[["fotos", "Fotografías", "Evidencias fotográficas de actividades"], ["documentos", "Documentos PDF", "Documentos que envían las sedes y los equipos"]].map(([k, n, d]) =>
       h("button", { role: "tab", class: "album" + (k === album ? " activo" : ""), "aria-selected": k === album, onclick: () => { if (S.album !== k) { S.album = k; S.rerender(); } } }, h("b", {}, n), h("span", {}, d))));
+  api("/api/evidencias?" + new URLSearchParams({ area: S.area, album: "fotos", limit: 1 })).then((r) => albumes.children[0]?.append(h("em", { class: "cuenta-alb" }, String(r.total)))).catch(() => {});
+  api("/api/evidencias?" + new URLSearchParams({ area: S.area, album: "documentos", limit: 1 })).then((r) => albumes.children[1]?.append(h("em", { class: "cuenta-alb" }, String(r.total)))).catch(() => {});
   const adjuntar = esAdmin ? h("button", { class: "btn", onclick: () => abrirForm(null) }, "+ Adjuntar evidencia") : "";
 
   function abrirForm(ev) {

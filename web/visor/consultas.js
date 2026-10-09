@@ -66,10 +66,16 @@ export async function vistaConsultas(c, S) {
     if (!medidas.length) { medidas = r.medidas; medida.replaceChildren(...medidas.map((m) => h("option", { value: m.clave }, m.etiqueta))); poner(); }
     const sub = `${r.medida.etiqueta} · ${r.por === "mes" ? "por mes" : r.por === "sede" ? "por sede" : r.por === "siau" ? "por SIAU" : "por tipo"} · ${mesTxt(r.meses[0])}${r.meses.length > 1 ? " – " + mesTxt(r.meses.at(-1)) : ""}`;
     const miles = (v) => (v == null ? "—" : Number(v).toLocaleString("es-CO"));
-    const grafico = !r.filas.length ? h("p", { class: "mut" }, "No hay datos con esos filtros.")
+    const grafico = !r.filas.length ? h("div", { class: "vacio-info" }, h("b", {}, "No hay datos con esos filtros."), h("p", { class: "mut" }, "Pruebe ampliando el periodo, quitando la sede o el SIAU, o cambiando la medida. Los datos salen de los consolidados de Drive: si falta un mes, actualícelos desde el Administrador."))
       : r.por === "mes" && r.filas.length > 1 ? barrasMes(r.filas.map((f) => ({ mes: f.clave, v: f.valor ?? 0 })), [{ clave: "v", etq: r.medida.etiqueta, color: COLOR.nps }], { titulo: sub })
       : barrasH(r.filas.slice(0, 15).map((f) => ({ etq: f.etiqueta, valor: f.valor })), { color: COLOR.nps });
-    salida.replaceChildren(h("section", { class: "card" }, h("h3", { style: "margin:0 0 2px;color:var(--azul)" }, sub), h("p", { class: "sub mut", style: "margin:0 0 10px" }, r.filas.length ? `${r.filas.length} fila(s)` : ""), grafico),
+    const vals = r.filas.map((f) => f.valor).filter((v) => v != null), nF = (v) => (v == null ? "—" : Number(v).toLocaleString("es-CO", { maximumFractionDigits: 1 }));
+    const mayor = r.filas.reduce((m, f) => ((f.valor ?? -1) > (m?.valor ?? -1) ? f : m), null), menor = r.filas.reduce((m, f) => (f.valor != null && (m == null || f.valor < m.valor) ? f : m), null);
+    const cual = (f) => (f ? (r.por === "mes" ? mesCorto(f.clave) + " " + f.clave.slice(0, 4) : f.etiqueta) : "—");
+    const resumen = vals.length ? h("div", { class: "franja", style: "margin-bottom:14px" },
+      [["Total", nF(r.total), "Suma del periodo"], ["Promedio", nF(vals.reduce((a, b) => a + b, 0) / vals.length), `Por ${r.por === "mes" ? "mes" : r.por === "sede" ? "sede" : r.por === "siau" ? "SIAU" : "tipo"}`], ["Mayor", nF(mayor?.valor), cual(mayor)], ["Menor", nF(menor?.valor), cual(menor)]]
+        .map(([k, v, n]) => h("div", { class: "cifra" }, h("span", { class: "k" }, k), h("span", { class: "v" }, v), h("span", { class: "n" }, n)))) : "";
+    salida.replaceChildren(resumen, h("section", { class: "card" }, h("h3", { style: "margin:0 0 2px;color:var(--azul)" }, sub), h("p", { class: "sub mut", style: "margin:0 0 10px" }, r.filas.length ? `${r.filas.length} fila(s)` : ""), grafico),
       r.filas.length ? h("section", { class: "card scroll", style: "margin-top:14px" }, h("table", { class: "cient" },
         h("thead", {}, h("tr", {}, h("th", {}, r.por === "mes" ? "Mes" : r.por === "sede" ? "Sede" : r.por === "siau" ? "SIAU" : "Tipo"), h("th", { class: "num" }, r.medida.etiqueta))),
         h("tbody", {}, r.filas.map((f) => h("tr", {}, h("td", {}, r.por === "mes" ? mesCorto(f.clave) + " " + f.clave.slice(0, 4) : f.etiqueta), h("td", { class: "num" }, miles(f.valor))))),

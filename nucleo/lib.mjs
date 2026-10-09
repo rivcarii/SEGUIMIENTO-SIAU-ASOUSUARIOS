@@ -84,6 +84,13 @@ export function calcularPorTecnico({ mes, hoy, tecnicos, asignaciones, ausencias
     }
     const metaEnc = metas.encuestas == null ? null : Math.round(metas.encuestas * f), metaCh = metas.charlas == null ? null : Math.round(metas.charlas * f);
     const encNps = Math.round(acc.nps), encMed = Math.round(acc.medica), enc = encNps + encMed, ch = Math.round(acc.charlas), n = acc.p + acc.m + acc.d;
+    // Desglose por sede: lo que aporta cada una (ya repartido entre quienes la atienden)
+    const porSede = mis.map((sid) => {
+      const w = 1 / (responsables.get(sid)?.length || 1), propias = actas.filter((x) => x.sede_id === sid && x.fecha.startsWith(mes) && x.fecha <= hoy);
+      return { sede_id: sid, sede: nombreSede.get(sid), comparte: Math.max(0, (responsables.get(sid)?.length || 1) - 1),
+        nps: Math.round(w * valor(sid, "encuestas")), medica: Math.round(w * valor(sid, "medica_evaluaciones")), charlas: Math.round(w * (valor(sid, "charlas_usuarios") + valor(sid, "charlas_funcionarios"))),
+        actas_esperadas: propias.length, actas_entregadas: propias.filter((x) => x.estado === "entregado").length };
+    }).sort((a, b) => (b.nps + b.medica + b.charlas) - (a.nps + a.medica + a.charlas) || a.sede.localeCompare(b.sede, "es"));
     const pend = [];
     let esperadas = 0, entregadas = 0;
     for (const sid of mis) for (const a of actas.filter((x) => x.sede_id === sid && x.fecha.startsWith(mes) && x.fecha <= hoy)) {
@@ -101,6 +108,7 @@ export function calcularPorTecnico({ mes, hoy, tecnicos, asignaciones, ausencias
       estado: f === 0 ? "ausente" : cumple ? "cumple" : avance >= 60 ? "camino" : "atencion", avance, puntaje,
       tecnico_id: t.id, nombre: t.nombre, sedes: mis.map((id) => nombreSede.get(id)).filter(Boolean).sort(),
       dias_activos: Math.round(f * D), dias_mes: D, ausente: f === 0, ausencias: ausenciasMes,
+      por_sede: porSede,
       encuestas: { valor: enc, meta: metaEnc, cumple: metaEnc == null ? null : enc >= metaEnc, nps: encNps, medica: encMed },
       charlas: { valor: ch, meta: metaCh, cumple: metaCh == null ? null : ch >= metaCh },
       nps: n ? Math.round((1000 * (acc.p - acc.d)) / n) / 10 : null,

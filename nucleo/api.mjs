@@ -5,7 +5,7 @@ import { parsearBuzon, parsearCharlasMatriz, parsearEncuestas, parsearHorario, p
 import { calcularCumplimiento, calcularPorTecnico, fechaValida, mesValido } from "./lib.mjs";
 import { analizar } from "./analisis.mjs";
 import { mismaPersona, sedesPorPersona } from "./rotacion.mjs";
-import { consultar, panel as armarPanel, MEDIDAS, DIMENSIONES } from "./analitica.mjs";
+import { consultar, panel as armarPanel, ranking, mesesEntre, MEDIDAS, DIMENSIONES } from "./analitica.mjs";
 
 export const VERSION_DATOS = 3;
 export class ErrorHttp extends Error { constructor(estado, mensaje) { super(mensaje); this.estado = estado; } }
@@ -189,6 +189,24 @@ export function crearNucleo({ almacen, fotos, hoy = () => new Date().toLocaleDat
     return armarPanel(mes, cumplimiento(mes), { mensual: T("mensual").todos(), evidencias: T("evidencias").todos(), sedes: T("sedes").todos().filter((s) => Number(s.activa)), tipos: T("tipos").todos() });
   }
 
+  /** Ficha completa de un SIAU: su fila del mes, puesto frente al equipo, aporte por sede, últimos 6 meses y evidencias registradas. */
+  function detalleSiau(id, mes) {
+    if (!mesValido(mes)) throw bad("Mes inválido");
+    const idn = enteroEn(id, 1, 1e9);
+    const c = cumplimiento(mes), filas = c.siau.tecnicos, t = filas.find((x) => x.tecnico_id === idn);
+    if (!t) throw new ErrorHttp(404, "Ese SIAU no se evalúa este mes");
+    const evaluados = filas.filter((x) => !x.ausente), rk = ranking(filas), pos = rk.findIndex((x) => x.id === idn);
+    const prom = (f) => (evaluados.length ? Math.round((10 * evaluados.reduce((a, x) => a + f(x), 0)) / evaluados.length) / 10 : null);
+    const [a, m] = mes.split("-").map(Number), desde = new Date(a, m - 6, 1), ini = `${desde.getFullYear()}-${String(desde.getMonth() + 1).padStart(2, "0")}`;
+    const serie = mesesEntre(ini, mes).map((mm) => { const f = cumplimiento(mm).siau.tecnicos.find((x) => x.tecnico_id === idn); return { mes: mm, nps: f?.encuestas.nps ?? 0, medica: f?.encuestas.medica ?? 0, charlas: f?.charlas.valor ?? 0, puntaje: f?.puntaje ?? null, ausente: f?.ausente ?? false }; });
+    const tipos = porId(T("tipos").todos()), evs = T("evidencias").todos().filter((e) => e.tecnico_id === idn && e.fecha.startsWith(mes)).sort((x, y) => (x.fecha < y.fecha ? 1 : -1));
+    return { mes, hoy: c.hoy, dias_mes: c.siau.dias, fila: t,
+      puesto: pos >= 0 ? { n: pos + 1, de: evaluados.length, puntaje: rk[pos].puntaje } : { n: null, de: evaluados.length, puntaje: t.puntaje },
+      equipo: { puntaje: prom((x) => x.puntaje ?? 0), encuestas: prom((x) => x.encuestas.valor), charlas: prom((x) => x.charlas.valor) },
+      serie, evidencias: { total: evs.length, por_tipo: [...new Set(evs.map((e) => e.tipo))].map((k) => ({ tipo: tipos.get(k)?.nombre ?? k, n: evs.filter((e) => e.tipo === k).length })),
+        ultimas: evs.slice(0, 5).map((e) => ({ id: e.id, titulo: e.titulo, fecha: e.fecha, tipo: tipos.get(e.tipo)?.nombre ?? e.tipo, portada: e.portada ?? null, fotos: lista(e.fotos).length, documentos: lista(e.documentos).length })) } };
+  }
+
   /** Motor de consulta: una medida, agrupada por mes, sede, SIAU o tipo, con filtros de periodo, sede y SIAU. */
   function consulta(q) {
     try {
@@ -305,6 +323,7 @@ export function crearNucleo({ almacen, fotos, hoy = () => new Date().toLocaleDat
     if (m === "GET" && p === "/api/evidencias") { exigir(usuario, "visor"); return listarEvidencias(q); }
     if (m === "GET" && p === "/api/cumplimiento") { exigir(usuario, "visor"); return cumplimiento(q.mes ?? hoy().slice(0, 7), q.hoy || undefined); }
     if (m === "GET" && p === "/api/panel") { exigir(usuario, "visor"); return panelDe(q.mes ?? hoy().slice(0, 7)); }
+    if (m === "GET" && p === "/api/siau") { exigir(usuario, "visor"); return detalleSiau(q.id, q.mes ?? hoy().slice(0, 7)); }
     if (m === "GET" && p === "/api/consulta") { exigir(usuario, "visor"); return consulta(q); }
     if (m === "GET" && p === "/api/estado") { exigir(usuario, "visor"); const { hallazgos, fuentes } = estado(q.hoy || undefined); return { hallazgos, fuentes: fuentes.map(({ tipo, creado }) => ({ tipo, creado })) }; }
 

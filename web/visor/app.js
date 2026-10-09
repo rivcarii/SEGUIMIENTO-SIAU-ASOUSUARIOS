@@ -2,6 +2,7 @@ import { api, h, mesActual, fmtFecha, opciones, pintarMarca, mascota, tituloGran
 import { vistaPanel } from "./panel.js";
 import { vistaConsultas } from "./consultas.js";
 import { vistaFototeca } from "./fototeca.js";
+import { cargarFicha } from "./ficha.js";
 import { construirReporte, descargarReporte } from "../shared/reporte.js";
 
 const app = document.getElementById("app"), dlg = document.getElementById("dlg"), dlgc = document.getElementById("dlgc"), tabbar = document.getElementById("tabbar");
@@ -158,18 +159,20 @@ async function vistaCumplimiento(c) {
   const lsc = l ? h("div", { class: "grid" },
     h("div", { class: "card" }, h("div", { class: "mut" }, "Atenciones con intérprete"), h("div", { class: "big", style: "margin-top:6px" }, String(l.atenciones))),
     h("div", { class: "card" }, h("div", { class: "mut" }, "Actividades LSC"), h("div", { class: "big", style: "margin-top:6px" }, String(l.actividades), " ", h("small", {}, `${l.asistentes} asistentes`))),
-    h("div", { class: "card" }, h("div", { class: "mut" }, "Sedes atendidas"), h("div", { class: "big", style: "margin-top:6px" }, String(l.sedes)), l.por_sede.length ? h("div", { class: "leyenda" }, l.por_sede.slice(0, 3).map((x) => `${x.sede} ${x.atenciones}`).join(" · ")) : "")) : h("div", { class: "card" }, h("p", { class: "mut" }, "Sin registros de acompañamiento LSC para este mes."));
+    h("div", { class: "card" }, h("div", { class: "mut" }, "Sedes atendidas"), h("div", { class: "big", style: "margin-top:6px" }, String(l.sedes)), l.por_sede.length ? h("div", { class: "leyenda" }, l.por_sede.slice(0, 3).map((x) => `${x.sede} ${x.atenciones}`).join(" · ")) : "")) : h("div", { class: "card vacio-info" }, h("b", {}, "Sin registros de acompañamiento con intérprete en este mes."), h("p", { class: "mut" }, "Aparecen aquí cuando el consolidado del intérprete (hojas «REGISTRO» y «ACTIVIDADES ASOCIADAS LSC») tiene atenciones con fecha en el mes elegido. Pruebe con otro mes o actualice los consolidados desde el Administrador."));
 
   const avisos = [d.sin_reconocer ? h("div", { class: "msg err" }, `${d.sin_reconocer} nombre(s) de sede de los consolidados no se reconocieron; no se están contando. Corríjalos en Administrador → Personal y rotación.`) : "",
     d.sincronizado ? h("p", { class: "leyenda" }, `Consolidados sincronizados: ${d.sincronizado} UTC.`) : ""];
   const hall = (est?.hallazgos ?? []).filter((x) => x.nivel !== "info");
   const bot = hall.length ? h("div", { class: "msg err" }, h("b", {}, "Atención con los datos: "), hall.slice(0, 4).map((x) => h("div", {}, "• " + x.texto))) : "";
 
+  const fichaHost = S.siau ? h("div", {}) : null;
+  if (fichaHost) cargarFicha(fichaHost, S, (v, x = {}) => { S.vista = v; if ("siau" in x) S.siau = x.siau; S.rerender(); window.scrollTo({ top: 0 }); });
   c.replaceChildren(hero, h("div", { class: "filters" }, h("label", { style: "margin:0" }, "Periodo de observación"), mes, filtroSiau,
       h("button", { class: "btn", onclick: () => descargarReporte(construirReporte(d, S.siau)) }, S.siau ? "Reporte de esta persona" : "Descargar reporte"),
       h("button", { class: "btn sec", onclick: async (ev) => { try { await navigator.clipboard.writeText(construirReporte(d, S.siau).texto); ev.target.textContent = "¡Copiado!"; } catch { ev.target.textContent = "No se pudo copiar"; } setTimeout(() => { ev.target.textContent = "Copiar resumen"; }, 2000); } }, "Copiar resumen")), ...avisos,
-    sec(1, S.siau ? "Cumplimiento de " + quien : "Cumplimiento global"), resumen, ...(S.siau ? [] : [h("div", { style: "height:14px" }), porTipo]), detalleSiau,
-    h("div", { style: "height:14px" }), sec(2, S.siau ? "Detalle" : "Cumplimiento por SIAU"), tabla, h("p", { class: "leyenda" }, h("b", {}, "Fig. 1."), " Metas mínimas por SIAU. Lo registrado en cada sede se reparte entre quienes la atienden; la meta baja en proporción a los días de vacaciones o licencia."),
+    sec(1, S.siau ? "Cumplimiento de " + quien : "Cumplimiento global"), resumen, ...(S.siau ? [h("div", { style: "height:18px" }), fichaHost] : [h("div", { style: "height:14px" }), porTipo]),
+    ...(S.siau ? [] : [h("div", { style: "height:14px" }), sec(2, "Cumplimiento por SIAU"), tabla]), ...(S.siau ? [] : [h("p", { class: "leyenda" }, h("b", {}, "Fig. 1."), " Metas mínimas por SIAU. Lo registrado en cada sede se reparte entre quienes la atienden; la meta baja en proporción a los días de vacaciones o licencia.")]),
     ...(sinCob && !S.siau ? [sec(3, "Sedes sin cobertura"), sinCob] : []),
     sec(sinCob && !S.siau ? 4 : 3, "Actas de buzón"), actas, h("p", { class: "leyenda" }, h("b", {}, "Tabla 2."), " Actas de apertura de buzón vencidas y no entregadas."),
     sec(sinCob && !S.siau ? 5 : 4, "Acompañamiento LSC (intérprete)"), lsc, bot);

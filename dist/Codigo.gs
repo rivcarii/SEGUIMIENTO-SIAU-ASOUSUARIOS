@@ -203,6 +203,13 @@ function calcularPorTecnico({ mes, hoy, tecnicos, asignaciones, ausencias, sedes
     }
     const metaEnc = metas.encuestas == null ? null : Math.round(metas.encuestas * f), metaCh = metas.charlas == null ? null : Math.round(metas.charlas * f);
     const encNps = Math.round(acc.nps), encMed = Math.round(acc.medica), enc = encNps + encMed, ch = Math.round(acc.charlas), n = acc.p + acc.m + acc.d;
+    // Desglose por sede: lo que aporta cada una (ya repartido entre quienes la atienden)
+    const porSede = mis.map((sid) => {
+      const w = 1 / (responsables.get(sid)?.length || 1), propias = actas.filter((x) => x.sede_id === sid && x.fecha.startsWith(mes) && x.fecha <= hoy);
+      return { sede_id: sid, sede: nombreSede.get(sid), comparte: Math.max(0, (responsables.get(sid)?.length || 1) - 1),
+        nps: Math.round(w * valor(sid, "encuestas")), medica: Math.round(w * valor(sid, "medica_evaluaciones")), charlas: Math.round(w * (valor(sid, "charlas_usuarios") + valor(sid, "charlas_funcionarios"))),
+        actas_esperadas: propias.length, actas_entregadas: propias.filter((x) => x.estado === "entregado").length };
+    }).sort((a, b) => (b.nps + b.medica + b.charlas) - (a.nps + a.medica + a.charlas) || a.sede.localeCompare(b.sede, "es"));
     const pend = [];
     let esperadas = 0, entregadas = 0;
     for (const sid of mis) for (const a of actas.filter((x) => x.sede_id === sid && x.fecha.startsWith(mes) && x.fecha <= hoy)) {
@@ -220,6 +227,7 @@ function calcularPorTecnico({ mes, hoy, tecnicos, asignaciones, ausencias, sedes
       estado: f === 0 ? "ausente" : cumple ? "cumple" : avance >= 60 ? "camino" : "atencion", avance, puntaje,
       tecnico_id: t.id, nombre: t.nombre, sedes: mis.map((id) => nombreSede.get(id)).filter(Boolean).sort(),
       dias_activos: Math.round(f * D), dias_mes: D, ausente: f === 0, ausencias: ausenciasMes,
+      por_sede: porSede,
       encuestas: { valor: enc, meta: metaEnc, cumple: metaEnc == null ? null : enc >= metaEnc, nps: encNps, medica: encMed },
       charlas: { valor: ch, meta: metaCh, cumple: metaCh == null ? null : ch >= metaCh },
       nps: n ? Math.round((1000 * (acc.p - acc.d)) / n) / 10 : null,
@@ -671,7 +679,7 @@ const { parsearBuzon, parsearCharlasMatriz, parsearEncuestas, parsearHorario, pa
 const { calcularCumplimiento, calcularPorTecnico, fechaValida, mesValido } = M_lib;
 const { analizar } = M_analisis;
 const { mismaPersona, sedesPorPersona } = M_rotacion;
-const { consultar, panel: armarPanel, MEDIDAS, DIMENSIONES } = M_analitica;
+const { consultar, panel: armarPanel, ranking, mesesEntre, MEDIDAS, DIMENSIONES } = M_analitica;
 
 const VERSION_DATOS = 3;
 class ErrorHttp extends Error { constructor(estado, mensaje) { super(mensaje); this.estado = estado; } }
@@ -855,6 +863,24 @@ function crearNucleo({ almacen, fotos, hoy = () => new Date().toLocaleDateString
     return armarPanel(mes, cumplimiento(mes), { mensual: T("mensual").todos(), evidencias: T("evidencias").todos(), sedes: T("sedes").todos().filter((s) => Number(s.activa)), tipos: T("tipos").todos() });
   }
 
+  /** Ficha completa de un SIAU: su fila del mes, puesto frente al equipo, aporte por sede, últimos 6 meses y evidencias registradas. */
+  function detalleSiau(id, mes) {
+    if (!mesValido(mes)) throw bad("Mes inválido");
+    const idn = enteroEn(id, 1, 1e9);
+    const c = cumplimiento(mes), filas = c.siau.tecnicos, t = filas.find((x) => x.tecnico_id === idn);
+    if (!t) throw new ErrorHttp(404, "Ese SIAU no se evalúa este mes");
+    const evaluados = filas.filter((x) => !x.ausente), rk = ranking(filas), pos = rk.findIndex((x) => x.id === idn);
+    const prom = (f) => (evaluados.length ? Math.round((10 * evaluados.reduce((a, x) => a + f(x), 0)) / evaluados.length) / 10 : null);
+    const [a, m] = mes.split("-").map(Number), desde = new Date(a, m - 6, 1), ini = `${desde.getFullYear()}-${String(desde.getMonth() + 1).padStart(2, "0")}`;
+    const serie = mesesEntre(ini, mes).map((mm) => { const f = cumplimiento(mm).siau.tecnicos.find((x) => x.tecnico_id === idn); return { mes: mm, nps: f?.encuestas.nps ?? 0, medica: f?.encuestas.medica ?? 0, charlas: f?.charlas.valor ?? 0, puntaje: f?.puntaje ?? null, ausente: f?.ausente ?? false }; });
+    const tipos = porId(T("tipos").todos()), evs = T("evidencias").todos().filter((e) => e.tecnico_id === idn && e.fecha.startsWith(mes)).sort((x, y) => (x.fecha < y.fecha ? 1 : -1));
+    return { mes, hoy: c.hoy, dias_mes: c.siau.dias, fila: t,
+      puesto: pos >= 0 ? { n: pos + 1, de: evaluados.length, puntaje: rk[pos].puntaje } : { n: null, de: evaluados.length, puntaje: t.puntaje },
+      equipo: { puntaje: prom((x) => x.puntaje ?? 0), encuestas: prom((x) => x.encuestas.valor), charlas: prom((x) => x.charlas.valor) },
+      serie, evidencias: { total: evs.length, por_tipo: [...new Set(evs.map((e) => e.tipo))].map((k) => ({ tipo: tipos.get(k)?.nombre ?? k, n: evs.filter((e) => e.tipo === k).length })),
+        ultimas: evs.slice(0, 5).map((e) => ({ id: e.id, titulo: e.titulo, fecha: e.fecha, tipo: tipos.get(e.tipo)?.nombre ?? e.tipo, portada: e.portada ?? null, fotos: lista(e.fotos).length, documentos: lista(e.documentos).length })) } };
+  }
+
   /** Motor de consulta: una medida, agrupada por mes, sede, SIAU o tipo, con filtros de periodo, sede y SIAU. */
   function consulta(q) {
     try {
@@ -971,6 +997,7 @@ function crearNucleo({ almacen, fotos, hoy = () => new Date().toLocaleDateString
     if (m === "GET" && p === "/api/evidencias") { exigir(usuario, "visor"); return listarEvidencias(q); }
     if (m === "GET" && p === "/api/cumplimiento") { exigir(usuario, "visor"); return cumplimiento(q.mes ?? hoy().slice(0, 7), q.hoy || undefined); }
     if (m === "GET" && p === "/api/panel") { exigir(usuario, "visor"); return panelDe(q.mes ?? hoy().slice(0, 7)); }
+    if (m === "GET" && p === "/api/siau") { exigir(usuario, "visor"); return detalleSiau(q.id, q.mes ?? hoy().slice(0, 7)); }
     if (m === "GET" && p === "/api/consulta") { exigir(usuario, "visor"); return consulta(q); }
     if (m === "GET" && p === "/api/estado") { exigir(usuario, "visor"); const { hallazgos, fuentes } = estado(q.hoy || undefined); return { hallazgos, fuentes: fuentes.map(({ tipo, creado }) => ({ tipo, creado })) }; }
 
