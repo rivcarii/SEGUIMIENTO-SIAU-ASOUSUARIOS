@@ -254,3 +254,15 @@ test("configurar carga la rotación de los 15 SIAU y, si la base venía de la ve
   assert.equal(e.llamar("GET", "/api/config").datos.tecnicos.length, 15);
   assert.equal(e.llamar("GET", "/api/cumplimiento", { q: { mes: "2026-09" } }).datos.siau.sin_cobertura.length, 0);
 });
+
+test("permisos: ADMINS2, ADMINS3, VISORES2… también cuentan y se ignoran mayúsculas y duplicados", () => {
+  const base = entorno(); base.ctx.configurar();
+  const props = { ...base.propiedades, ADMINS2: "Segunda@Miredips.org", ADMINS3: "tercera@miredips.org, segunda@miredips.org", VISORES2: "lector@miredips.org" };
+  for (const [usuario, rol] of [["segunda@miredips.org", true], ["tercera@miredips.org", true], ["lector@miredips.org", false], ["otra@miredips.org", false]]) {
+    const e = entorno({ usuario, props });
+    for (const [id, l] of base.hojasPorLibro) e.hojasPorLibro.set(id, l);
+    for (const [id, f] of base.archivosPorId) e.archivosPorId.set(id, f);
+    assert.equal(e.llamar("POST", "/api/admin/tecnicos", { cuerpo: { nombre: "X" + usuario.length } }).ok, rol, usuario);
+    assert.equal(e.llamar("GET", "/api/config").ok, usuario !== "otra@miredips.org", usuario);
+  }
+});

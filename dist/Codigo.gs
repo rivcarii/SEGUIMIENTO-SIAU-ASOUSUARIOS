@@ -1179,7 +1179,12 @@ function crearFotosDrive(carpetaId) {
 
 // ───────────────────────── Sesión y permisos ─────────────────────────
 function listaCorreos_(clave) {
-  return String(propiedades_().getProperty(clave) || '').split(/[\s,;]+/).map(function (s) { return s.trim().toLowerCase(); }).filter(Boolean);
+  // Lee ADMINS, ADMINS2, ADMINS3… (o VISORES, VISORES2…): cada propiedad puede traer uno o varios correos separados por coma.
+  var props = propiedades_().getProperties(), re = new RegExp('^' + clave + '\\d*$'), r = [];
+  Object.keys(props).filter(function (k) { return re.test(k); }).sort().forEach(function (k) {
+    String(props[k] || '').split(/[\s,;]+/).forEach(function (c) { c = c.trim().toLowerCase(); if (c && r.indexOf(c) < 0) r.push(c); });
+  });
+  return r;
 }
 
 /** { email, rol } — el dueño del script siempre es administrador; ADMINS y VISORES son listas de correos separadas por coma. */
