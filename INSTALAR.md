@@ -1,4 +1,6 @@
-# Puesta en marcha del enlace (≈30 minutos, una sola vez)
+# Puesta en marcha
+
+> **Para empezar a ver datos ya:** ejecute la plataforma (`ADMIN_PASSWORD=… npm start`) y use *Administrador → Importar consolidados*. Lo de abajo es para **automatizarlo** (servidor público + script de Google), ≈30 minutos, una sola vez.
 
 Orden: **1) publicar la plataforma → 2) secretos del repositorio → 3) script en la cuenta siau@miredips.org → 4) comprobar.**
 

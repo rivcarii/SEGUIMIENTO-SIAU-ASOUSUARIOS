@@ -41,6 +41,15 @@ const LISTA_BLANCA = {
   ilscActividades: [function (n) { return n.indexOf('fecha de la atencion') === 0; }, function (n) { return n === 'tematica'; }, function (n) { return n === 'sede'; }, function (n) { return n.indexOf('asistentes') >= 0; }],
 };
 
+/** Vacía las celdas de la columna «CEDULA» (el horario trae la cédula del personal; la plataforma no la necesita). */
+function sinCedula(grid) {
+  if (!grid) return grid;
+  const h = grid.findIndex(function (f) { return f.some(function (c) { return norm(c) === 'cedula'; }); });
+  if (h < 0) return grid;
+  const col = grid[h].findIndex(function (c) { return norm(c) === 'cedula'; });
+  return grid.map(function (f, i) { return i <= h ? f : f.map(function (c, j) { return j === col ? '' : c; }); });
+}
+
 function valores(libro, nombre) {
   const h = libro.getSheetByName(nombre);
   return h ? h.getDataRange().getDisplayValues() : null;
@@ -171,7 +180,7 @@ function sincronizar() {
       informe.push(enviar(p, {
         tipo: 'horario', archivo_id: elegido.getId(), archivo: elegido.getName(),
         mes: mi >= 0 ? anioArchivo + '-' + ('0' + (mi + 1)).slice(-2) : undefined,
-        hojas: { 'CUADRO DE TURNO': valores(l, 'CUADRO DE TURNO'), 'HORARIO PASOS': valores(l, 'HORARIO PASOS') },
+        hojas: { 'CUADRO DE TURNO': sinCedula(valores(l, 'CUADRO DE TURNO')), 'HORARIO PASOS': valores(l, 'HORARIO PASOS') },
       }));
     } catch (e) { errores.push('CARPETA_HORARIOS: ' + e.message); }
   }

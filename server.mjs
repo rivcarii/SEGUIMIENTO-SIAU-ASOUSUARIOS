@@ -132,7 +132,8 @@ const ultimoDiaMes = (mes) => new Date(Number(mes.slice(0, 4)), Number(mes.slice
 
 /** Reemplaza lo que ya se había leído de ese archivo (así se reflejan correcciones y filas borradas). */
 function sincronizarConsolidado(b) {
-  const fuente = txt(b.archivo_id, 200, true), archivo = txt(b.archivo, 300);
+  // Cada consolidado único tiene una sola «fuente»: importar a mano y el script de Drive se reemplazan entre sí (nunca se duplican).
+  const fuente = ["charlas_matriz", "buzon", "nps", "medica", "ilsc"].includes(b.tipo) ? b.tipo : txt(b.archivo_id, 200, true), archivo = txt(b.archivo, 300);
   const resolver = resolverSedes();
   const noReconocidas = new Set(), resumen = { tipo: b.tipo, archivo };
   const sedeId = (t, alt) => { const x = resolver(t) ?? (alt ? resolver(alt) : null); if (!x) noReconocidas.add(t || alt || "(vacía)"); return x?.id ?? null; };
@@ -341,6 +342,8 @@ async function api(req, res, url) {
   // ----- Administración
   if (!p.startsWith("/api/admin/")) throw new HttpError(404, "No encontrado");
   exigirAdmin(req);
+
+  if (m === "POST" && p === "/api/admin/importar") return json(res, sincronizarConsolidado(await leerJson(req, 12e6)), 201);
 
   if (m === "POST" && p === "/api/admin/foto") return json(res, { archivo: await subirImagen(req) }, 201);
 

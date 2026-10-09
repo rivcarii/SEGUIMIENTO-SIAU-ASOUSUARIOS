@@ -1,3 +1,5 @@
+import { abrirLibro } from "/shared/xlsx.js";
+import { prepararLibro, ETIQUETAS } from "/shared/preparar.js";
 import { api, h, fechaHoy, fmtFecha, mesActual, opciones, pintarMarca, mascota, tituloGrande } from "/shared/comun.js";
 
 const app = document.getElementById("app"), salir = document.getElementById("salir");
@@ -23,11 +25,11 @@ function login() {
   } }, h("h2", {}, "Acceso administrador"), h("label", {}, "Contraseña"), pw, msg, h("p", {}, h("button", { class: "btn" }, "Entrar")))));
 }
 
-const SECCIONES = [["nueva", "Nueva evidencia"], ["lista", "Evidencias"], ["personal", "Personal y rotación"], ["catalogos", "Sedes y técnicos"], ["metas", "Metas"], ["marca", "Logos"]];
+const SECCIONES = [["nueva", "Nueva evidencia"], ["lista", "Evidencias"], ["importar", "Importar consolidados"], ["personal", "Personal y rotación"], ["catalogos", "Sedes y técnicos"], ["metas", "Metas"], ["marca", "Logos"]];
 function render() {
   const cont = h("div");
   app.replaceChildren(titulo.el, h("nav", { class: "tabs glass" }, SECCIONES.map(([k, n]) => h("button", { "aria-pressed": k === seccion, onclick: () => { seccion = k; render(); } }, n))), cont);
-  ({ nueva: formEvidencia, lista: listaEvidencias, personal, catalogos, metas, marca })[seccion](cont);
+  ({ nueva: formEvidencia, lista: listaEvidencias, importar, personal, catalogos, metas, marca })[seccion](cont);
 }
 
 // ---- reducción de imagen en el navegador (fotos de celular pesan 5-10 MB)
@@ -134,6 +136,35 @@ function marca(cont) {
   cont.replaceChildren(msg, h("div", { class: "row" }, logo("siau", "Logo SIAU"), logo("asociacion", "Logo Asociación de Usuarios")),
     h("div", { class: "card", style: "margin-top:14px" }, h("h3", {}, "Nombres"), h("label", {}, "Nombre del módulo SIAU"), n1, h("label", {}, "Nombre del módulo Asociación"), n2,
       h("p", {}, h("button", { class: "btn", onclick: async () => { await api("/api/admin/marca", { method: "PUT", json: { nombre_siau: n1.value, nombre_asociacion: n2.value } }); cfg = await api("/api/config"); pintarMarca(cfg.marca); aviso(msg, true, "Guardado."); } }, "Guardar nombres"))));
+}
+
+// ---- Importar consolidados: se leen los .xlsx en este navegador y solo se envían las columnas permitidas
+function importar(cont) {
+  const archivos = h("input", { type: "file", multiple: true, accept: ".xlsx" }), lista = h("div");
+  const btn = h("button", { class: "btn", onclick: async () => {
+    if (!archivos.files.length) return lista.replaceChildren(h("div", { class: "msg err" }, "Elija uno o más archivos .xlsx."));
+    lista.replaceChildren(); btn.disabled = true;
+    for (const f of archivos.files) {
+      const fila = h("div", { class: "card", style: "margin-top:12px" }, h("strong", {}, f.name), h("div", { class: "mut" }, "Leyendo…"));
+      lista.append(fila);
+      const poner = (...x) => fila.replaceChildren(h("strong", {}, f.name), ...x);
+      try {
+        const r = await prepararLibro(await abrirLibro(await f.arrayBuffer()), f.name);
+        poner(h("div", { class: "mut" }, `${ETIQUETAS[r.tipo]} · enviando…`));
+        const j = await api("/api/admin/importar", { json: r.cuerpo });
+        const nr = j.sedes_no_reconocidas ?? [], av = j.avisos ?? [];
+        poner(h("div", { class: "msg ok" }, `${ETIQUETAS[r.tipo]}: ${j.registros ?? j.personal} ${j.personal != null ? "personas" : "registros"}${j.asignaciones != null ? ` · ${j.asignaciones} sedes asignadas · ${j.ausencias} ausencias` : ""}${r.nota ? ` · ${r.nota}` : ""}`),
+          r.descartadas.length ? h("details", { class: "mut" }, h("summary", {}, `${r.descartadas.length} columna(s) NO se enviaron (datos personales u otros); se quedaron en este computador`), r.descartadas.join(" · ")) : "",
+          av.length ? h("div", { class: "msg err" }, `${av.length} aviso(s): ${av.slice(0, 3).join(" · ")}`) : "",
+          nr.length ? h("div", { class: "msg err" }, `${nr.length} nombre(s) de sede sin reconocer: ${nr.join(", ")}. Indique a qué sede corresponde cada uno en «Personal y rotación».`) : "");
+      } catch (e) { poner(h("div", { class: "msg err" }, e.message)); }
+    }
+    btn.disabled = false;
+  } }, "Leer y enviar");
+  cont.replaceChildren(h("div", { class: "card" }, h("h3", {}, "Importar consolidados"),
+    h("p", { class: "mut" }, "Descargue los consolidados de Drive como Excel (Archivo → Descargar → Microsoft Excel .xlsx) y súbalos aquí; puede elegir varios a la vez: charlas, buzón, NPS, evaluación médica, registro del intérprete y el horario del mes. La plataforma los reconoce sola."),
+    h("p", { class: "mut" }, "Privacidad: los archivos se leen en este navegador. De los formularios y del registro del intérprete solo se envían la fecha, la sede y la calificación; nombres, cédulas, teléfonos y correos no salen de su computador. Volver a importar un consolidado reemplaza la versión anterior."),
+    archivos, h("p", {}, btn)), lista);
 }
 
 // ---- Personal y rotación: sedes de cada SIAU por mes, vacaciones/licencias y nombres de sede sin reconocer

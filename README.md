@@ -33,9 +33,11 @@ Primeros pasos en `/admin/`: *Logos* → *Sedes y técnicos* (pega las 40 sedes,
 - Meta **Por técnico** (se exige a cada SIAU) o **Global** (suma del equipo). Iniciales: 90 encuestas y 200 charlas, **por técnico**.
 - **Actas de buzón**: con el consolidado sincronizado, el calendario es el del consolidado; sin él, el tablero usa un acta por sede cada viernes a partir de las evidencias registradas.
 
-## Enlace con los consolidados (Drive de siau@miredips.org)
+## Enlace con los consolidados
 
-Los consolidados viven en el Drive **institucional**, así que el enlace corre **dentro de esa cuenta**: un script de Google ([`apps-script/EnlaceConsolidados.gs`](apps-script/EnlaceConsolidados.gs)) los lee una vez al día y envía a la plataforma (`POST /api/bot/consolidados`, con `BOT_TOKEN`) solo lo necesario. No hay claves de Google en este repositorio ni en el servidor, y no modifica nada en Drive. Instalación en el encabezado del archivo (≈5 minutos, una sola vez).
+**Camino directo (sin servidores ni claves): *Administrador → Importar consolidados*.** Descargue cada consolidado de Drive como Excel (*Archivo → Descargar → .xlsx*) y súbalos; puede elegir los seis a la vez (charlas, buzón, NPS, evaluación médica, registro del intérprete y horario del mes). La plataforma reconoce cada uno por sus hojas. Los archivos **se leen en el navegador** ([`web/shared/xlsx.js`](web/shared/xlsx.js) y [`preparar.js`](web/shared/preparar.js)): de los formularios y del registro del intérprete solo se envían fecha, sede y calificación, y la cédula del personal en el horario se vacía; **nombres, cédulas, teléfonos y correos no salen del computador**. Volver a importar un consolidado reemplaza el anterior (nunca duplica).
+
+Más adelante se puede automatizar con el script de Google ([`apps-script/`](apps-script/EnlaceConsolidados.gs), ver [INSTALAR.md](INSTALAR.md)): hace lo mismo todos los días desde la cuenta siau@miredips.org, y ambos caminos se reemplazan entre sí.
 
 | Archivo en Drive | Qué se toma | Qué alimenta |
 |---|---|---|
