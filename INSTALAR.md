@@ -56,6 +56,13 @@ Copie la URL `…/exec`: ese es el enlace del **visor**. El **administrador** es
 
 Las funciones de mantenimiento (`configurar`, `sincronizarDrive`, `crearAdministrador`…) solo corren desde el editor, nunca desde el navegador.
 
+## Puente con la plataforma de PQRS (opcional, solo lectura)
+La plataforma de PQRS (otra cuenta de Google y otra implementación) puede mostrar a sus administradores un resumen de esta plataforma sin que abran una segunda sesión. La consulta sale **del servidor de PQRS** hacia esta implementación (`doPost`), así no hay choques entre cuentas de Google en el navegador.
+1. En **Administrar → Accesos** cree un acceso con rol **Consulta** (por ejemplo «Puente PQRS») y copie su usuario y contraseña.
+2. En la plataforma de PQRS: **Seguimiento SIAU → Conexión**: pegue la dirección `…/exec` de esta implementación, el usuario y la contraseña, y pulse **Probar conexión**.
+3. Esta implementación debe seguir en **Ejecutar como: yo** y **Quién tiene acceso: Cualquier persona**. Tras pegar un `Codigo.gs` nuevo: **Implementar → Administrar implementaciones → ✏ → Versión nueva**.
+El puente solo permite iniciar y cerrar sesión y leer el resumen (`/api/panel`, `/api/cumplimiento`, `/api/sesion`); cualquier otra ruta responde 403. Para cortarlo, desactive ese acceso en **Accesos**.
+
 ## Al actualizar el código
 Pegue el nuevo `dist/Codigo.gs`, luego **Implementar → Administrar implementaciones → ✏ → Versión nueva**. La URL no cambia. Los datos no se tocan.
 

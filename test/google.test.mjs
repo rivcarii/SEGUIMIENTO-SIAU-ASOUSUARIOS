@@ -74,6 +74,7 @@ function entorno({ usuario = "siau@miredips.org", dueno = "siau@miredips.org", p
     ScriptApp: { getService: () => ({ getUrl: () => "https://script.google.com/macros/s/ABC/exec" }), getProjectTriggers: () => triggers,
       deleteTrigger: (t) => { triggers.splice(triggers.indexOf(t), 1); },
       newTrigger: (fn) => { const t = { getHandlerFunction: () => fn }; const b = { timeBased: () => b, everyDays: () => b, atHour: () => b, create: () => { triggers.push(t); return t; } }; return b; } },
+    ContentService: { MimeType: { JSON: "JSON" }, createTextOutput: (texto) => { const o = { texto }; o.setMimeType = (m) => { o.mime = m; return o; }; return o; } },
     Buffer,
   };
   if (cache) { const m = new Map(); ctx.CacheService = { getScriptCache: () => ({ get: (k) => m.get(k) ?? null, put: (k, v) => { m.set(k, v); }, putAll: (o) => { for (const [k, v] of Object.entries(o)) m.set(k, v); }, getAll: (ks) => Object.fromEntries(ks.filter((k) => m.has(k)).map((k) => [k, m.get(k)])), remove: (k) => { m.delete(k); } }) }; }
@@ -85,7 +86,7 @@ function entorno({ usuario = "siau@miredips.org", dueno = "siau@miredips.org", p
 
 test("el paquete se carga completo y no deja datos personales en el código", () => {
   const e = entorno();
-  for (const fn of ["doGet", "llamar", "configurar", "autoconfigurar", "sincronizarDrive", "instalarActivadorDiario", "diagnosticar"]) assert.equal(typeof e.ctx[fn], "function", fn);
+  for (const fn of ["doGet", "doPost", "llamar", "configurar", "autoconfigurar", "sincronizarDrive", "instalarActivadorDiario", "diagnosticar"]) assert.equal(typeof e.ctx[fn], "function", fn);
   assert.ok(CODIGO.length < 400_000);
 });
 
@@ -333,4 +334,25 @@ test("activador programado: lee los consolidados como máximo una vez cada 30 mi
   assert.ok(primera > 0);
   e.ctx.sincronizarDriveProgramado();
   assert.equal(e.logs.length, primera); // segunda llamada seguida: no hace nada
+});
+
+test("puente con PQRS: doPost es de solo lectura, exige sesión y no deja pasar rutas de administración", () => {
+  const e = entorno({ cache: true }); e.ctx.configurar();
+  const { clave } = e.ctx.crearAdministrador();
+  const anon = entorno({ usuario: "", props: e.propiedades, cache: true });
+  for (const [id, l] of e.hojasPorLibro) anon.hojasPorLibro.set(id, l);
+  for (const [id, f] of e.archivosPorId) anon.archivosPorId.set(id, f);
+  const post = (obj) => { const r = anon.ctx.doPost({ postData: { contents: typeof obj === "string" ? obj : JSON.stringify(obj) } }); assert.equal(r.mime, "JSON"); return JSON.parse(r.texto); };
+  const admin = post({ metodo: "POST", ruta: "/api/login", cuerpo: { usuario: "admin", clave } }).datos;
+  const crear = JSON.parse(anon.ctx.llamar(JSON.stringify({ metodo: "POST", ruta: "/api/admin/usuarios", cuerpo: { nombre: "Puente PQRS", rol: "visor" }, token: admin.token }))).datos;
+  const sesion = post({ metodo: "POST", ruta: "/api/login", cuerpo: { usuario: crear.usuario, clave: crear.clave } });
+  assert.equal(sesion.ok, true); assert.equal(sesion.datos.rol, "visor");
+  const panel = post({ metodo: "GET", ruta: "/api/panel", q: { mes: "2026-09" }, token: sesion.datos.token });
+  assert.equal(panel.ok, true); assert.ok(panel.datos.resumen && typeof panel.datos.resumen.siau === "number");
+  assert.equal(post({ metodo: "GET", ruta: "/api/panel" }).estado, 401);                                                    // sin sesión
+  for (const [metodo, ruta] of [["GET", "/api/admin/usuarios"], ["POST", "/api/admin/tecnicos"], ["POST", "/api/admin/sincronizar-drive"], ["GET", "/api/foto"], ["GET", "/api/evidencias"], ["POST", "/api/clave"]])
+    assert.equal(post({ metodo, ruta, token: sesion.datos.token, cuerpo: { nombre: "X" } }).estado, 403, ruta);               // fuera de la lista del puente
+  assert.equal(post("no es json").estado, 400);
+  assert.equal(post({ metodo: "post", ruta: "/api/logout", cuerpo: {}, token: sesion.datos.token }).ok, true);
+  assert.equal(post({ metodo: "GET", ruta: "/api/panel", token: sesion.datos.token }).estado, 401);                        // la sesión cerrada ya no sirve
 });

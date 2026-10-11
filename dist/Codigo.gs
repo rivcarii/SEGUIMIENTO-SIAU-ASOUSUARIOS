@@ -1431,6 +1431,24 @@ function doGet(e) {
   return pagina_(admin ? PLANTILLA_ADMIN : PLANTILLA_VISOR, admin ? 'Administrador · Evidencias SIAU' : 'Evidencias SIAU');
 }
 
+// ───────────────────────── Puente con la plataforma de PQRS (servidor a servidor) ─────────────────────────
+/**
+ * La plataforma de PQRS (otra cuenta de Google, otra implementación) consulta esta plataforma DESDE SU SERVIDOR con UrlFetchApp: así el
+ * administrador no abre una segunda sesión ni choca con varias cuentas de Google en el navegador. Es de solo lectura: únicamente
+ * inicio y cierre de sesión (usuario y contraseña de una cuenta «Consulta» creada para el puente) y las rutas de resumen de abajo.
+ * Todo lo demás (administrar, escribir, fotos, sincronizar) responde 403 por esta vía.
+ */
+var RUTAS_PUENTE_ = { 'POST /api/login': 1, 'POST /api/logout': 1, 'GET /api/sesion': 1, 'GET /api/panel': 1, 'GET /api/cumplimiento': 1 };
+function doPost(e) {
+  var salida = function (texto) { return ContentService.createTextOutput(texto).setMimeType(ContentService.MimeType.JSON); };
+  var req = null;
+  try { req = JSON.parse((e && e.postData && e.postData.contents) || ''); } catch (err) { req = null; }
+  if (!req || typeof req.ruta !== 'string' || typeof req.metodo !== 'string') return salida(JSON.stringify({ ok: false, estado: 400, error: 'Solicitud inválida' }));
+  req.metodo = req.metodo.toUpperCase();
+  if (!RUTAS_PUENTE_[req.metodo + ' ' + req.ruta]) return salida(JSON.stringify({ ok: false, estado: 403, error: 'Esta ruta no está disponible por el puente.' }));
+  return salida(llamar(JSON.stringify({ metodo: req.metodo, ruta: req.ruta, q: req.q || {}, cuerpo: req.cuerpo || {}, token: req.token })));
+}
+
 // ───────────────────────── Punto de entrada de la interfaz ─────────────────────────
 /** Recibe un texto JSON {metodo, ruta, q, cuerpo} y devuelve un texto JSON {ok, datos} | {ok:false, estado, error}. */
 function llamar(texto) {
