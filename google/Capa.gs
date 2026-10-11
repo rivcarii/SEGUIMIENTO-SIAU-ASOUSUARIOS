@@ -192,12 +192,31 @@ function usuario_() {
 }
 
 /**
- * Las funciones globales sin «_» al final las puede invocar desde el navegador cualquiera que abra la aplicación.
- * Las de mantenimiento solo corren desde el editor o un activador (sin correo identificable) o para un administrador.
+ * Toda función global sin «_» al final la puede invocar desde el navegador cualquiera que abra la aplicación (que ahora es pública).
+ * Las de mantenimiento solo corren desde el editor de Apps Script: allí quien ejecuta ES la cuenta dueña.
+ * Desde la web esa coincidencia no existe (visitante anónimo o cuenta distinta), así que se rechazan.
  */
-function exigirAdminOEditor_() {
-  var u = usuario_();
-  if (u.email && u.rol !== 'admin') throw new Error('Solo los administradores pueden ejecutar esto.');
+function exigirEditor_() {
+  var activa = '', efectiva = '';
+  try { activa = String(Session.getActiveUser().getEmail() || '').toLowerCase(); efectiva = String(Session.getEffectiveUser().getEmail() || '').toLowerCase(); } catch (e) { activa = ''; }
+  if (!activa || activa !== efectiva) throw new Error('Esta función solo se ejecuta desde el editor de Apps Script, con la cuenta dueña del proyecto.');
+}
+
+/** Servicios de seguridad para el acceso con usuario y contraseña (sesiones e intentos viven en la caché del script). null si no hay caché. */
+function seguridad_() {
+  var cache = null;
+  try { cache = typeof CacheService !== 'undefined' ? CacheService.getScriptCache() : null; } catch (e) { cache = null; }
+  if (!cache) return null;
+  return {
+    hash: function (clave, sal) {
+      var h = Utilities.newBlob(String(clave)).getBytes();
+      for (var i = 0; i < 150; i++) h = Utilities.computeHmacSha256Signature(h, String(sal));
+      return Utilities.base64Encode(h);
+    },
+    resumen: function (t) { return Utilities.base64Encode(Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, String(t))); },
+    azar: function (n) { var s = ''; while (s.length < n * 2) s += Utilities.getUuid().replace(/-/g, ''); return s.slice(0, n * 2); },
+    kv: { get: function (k) { return cache.get(k); }, put: function (k, v, seg) { cache.put(k, v, Math.min(seg, 21600)); }, del: function (k) { cache.remove(k); } },
+  };
 }
 
 var BLOQUEADO_ = false; // true mientras esta ejecución ya tiene el candado del script
@@ -217,7 +236,7 @@ function nucleo_() {
   if (!p.ID_BASE || !p.ID_FOTOS) throw new ErrorHttp(500, 'La plataforma no está configurada: ejecute «configurar» en el editor de Apps Script.');
   var almacen = crearAlmacenHojas(SpreadsheetApp.openById(p.ID_BASE));
   asegurarVersion_(almacen);
-  return { almacen: almacen, nucleo: crearNucleo({ almacen: almacen, fotos: crearFotosDrive(p.ID_FOTOS), hoy: hoyBogota_, ahora: ahoraBogota_ }) };
+  return { almacen: almacen, nucleo: crearNucleo({ almacen: almacen, fotos: crearFotosDrive(p.ID_FOTOS), hoy: hoyBogota_, ahora: ahoraBogota_, seguridad: seguridad_() }) };
 }
 
 // ───────────────────────── Páginas web ─────────────────────────
@@ -227,24 +246,9 @@ function pagina_(plantilla, titulo) {
   return HtmlService.createHtmlOutput(html).setTitle(titulo).addMetaTag('viewport', 'width=device-width, initial-scale=1').setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
 }
 
-function sinAcceso_(email, motivo) {
-  var dueno = '';
-  try { dueno = String(Session.getEffectiveUser().getEmail() || ''); } catch (e) { dueno = ''; }
-  var texto = email
-    ? 'La cuenta ' + email + ' no tiene acceso a esta plataforma. Pida a un administrador que agregue su correo.'
-    : 'Google no entregó el correo de quien abre la página. Esto pasa cuando el dueño del script es de otro dominio (por ejemplo un Gmail personal) o cuando la implementación no es «Ejecutar como: yo». Cree el proyecto y la implementación desde siau@miredips.org.';
-  var det = 'Cuenta detectada: ' + (email || '(vacía)') + '\nDueño del script: ' + (dueno || '(vacío)') + '\nAdministradores configurados: ' + listaCorreos_('ADMINS').length + '\nVisores configurados: ' + listaCorreos_('VISORES').length + (motivo ? '\nMotivo: ' + motivo : '');
-  var esc = function (t) { return String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;'); };
-  return HtmlService.createHtmlOutput('<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">' +
-    '<body style="font:16px/1.5 system-ui,sans-serif;max-width:36rem;margin:10vh auto;padding:0 1rem;color:#12315f"><h2>Sin acceso</h2><p>' + esc(texto) + '</p>' +
-    '<pre style="background:#eef3f8;padding:12px;border-radius:8px;white-space:pre-wrap;font-size:13px">' + esc(det) + '</pre></body>').setTitle('Sin acceso');
-}
-
+/** La página es pública (no lleva datos): quien no esté identificado ve el formulario de ingreso y los datos solo llegan tras iniciar sesión. */
 function doGet(e) {
-  var u = usuario_();
-  if (!u.rol) return sinAcceso_(u.email);
   var admin = e && e.parameter && e.parameter.pagina === 'admin';
-  if (admin && u.rol !== 'admin') return sinAcceso_(u.email, 'esta página es solo para administradores');
   return pagina_(admin ? PLANTILLA_ADMIN : PLANTILLA_VISOR, admin ? 'Administrador · Evidencias SIAU' : 'Evidencias SIAU');
 }
 
@@ -255,16 +259,18 @@ function llamar(texto) {
   try {
     var req = JSON.parse(texto);
     if (!req || typeof req.ruta !== 'string' || typeof req.metodo !== 'string') throw new ErrorHttp(400, 'Solicitud inválida');
-    var u = usuario_();
-    var escribe = req.metodo !== 'GET';
+    var libre = req.ruta === '/api/login' || req.ruta === '/api/logout' || req.ruta === '/api/sesion'; // no escriben en la base: sin candado
+    var escribe = req.metodo !== 'GET' && !libre;
     if (escribe) { bloqueo = LockService.getScriptLock(); bloqueo.waitLock(30000); BLOQUEADO_ = true; }
     var x = nucleo_();
+    var u = usuario_(); // Google (listas ADMINS/VISORES) si la cuenta se identifica; si no, la sesión de usuario y contraseña
+    if (!u.rol && typeof req.token === 'string') { var v = x.nucleo.identificar(req.token); if (v) u = v; }
     var datos;
     if (req.metodo === 'POST' && req.ruta === '/api/admin/sincronizar-drive') {
       if (u.rol !== 'admin') throw new ErrorHttp(403, 'Solo los administradores pueden hacer esto.');
       datos = sincronizarDriveCon_(x.nucleo);
     } else {
-      datos = x.nucleo.manejar({ metodo: req.metodo, ruta: req.ruta, q: req.q || {}, cuerpo: req.cuerpo || {} }, u);
+      datos = x.nucleo.manejar({ metodo: req.metodo, ruta: req.ruta, q: req.q || {}, cuerpo: req.cuerpo || {}, token: req.token }, u);
       if (escribe) x.almacen.guardar();
     }
     return JSON.stringify({ ok: true, datos: datos === undefined ? null : datos });
@@ -280,7 +286,7 @@ function llamar(texto) {
 // ───────────────────────── Instalación ─────────────────────────
 /** Ejecútela UNA vez desde el editor: crea la base de datos y la carpeta de fotos, y prepara permisos y enlaces. */
 function configurar() {
-  exigirAdminOEditor_();
+  exigirEditor_();
   var props = propiedades_(), actuales = props.getProperties(), informe = [];
   var dueno = String(Session.getEffectiveUser().getEmail() || '').toLowerCase();
   if (!actuales.ID_BASE) {
@@ -366,7 +372,7 @@ function candidatos_(consulta, filtro) {
  * (instale el script con siau@miredips.org) y guarda sus ID. No pisa lo ya configurado.
  */
 function autoconfigurar() {
-  exigirAdminOEditor_();
+  exigirEditor_();
   var props = propiedades_(), actuales = props.getProperties(), informe = [];
   BUSQUEDAS.forEach(function (b) {
     if (actuales[b[0]]) { informe.push(b[0] + ': ya configurado'); return; }
@@ -430,7 +436,7 @@ function sincronizarDriveCon_(nucleo) {
 
 /** La ejecuta el activador diario (y también se puede ejecutar a mano). */
 function sincronizarDrive() {
-  exigirAdminOEditor_();
+  exigirEditor_();
   var bloqueo = LockService.getScriptLock();
   bloqueo.waitLock(30000);
   BLOQUEADO_ = true;
@@ -445,15 +451,53 @@ function sincronizarDrive() {
 }
 
 /** Programa la sincronización todos los días a las 6 a. m. */
+/**
+ * Lo ejecuta el activador diario. Es pública (los activadores no pueden identificarse), así que se limita a una vez cada 30 minutos
+ * y solo lee los consolidados: no devuelve datos ni acepta parámetros.
+ */
+function sincronizarDriveProgramado() {
+  var cache = typeof CacheService !== 'undefined' ? CacheService.getScriptCache() : null;
+  if (cache) { if (cache.get('ult_sinc')) return; cache.put('ult_sinc', '1', 1800); }
+  var bloqueo = LockService.getScriptLock();
+  bloqueo.waitLock(30000);
+  BLOQUEADO_ = true;
+  try {
+    var x = nucleo_();
+    var r = sincronizarDriveCon_(x.nucleo);
+    x.almacen.guardar();
+    console.log(r.informe.concat(r.errores.map(function (e) { return 'ERROR · ' + e; })).join('\n'));
+    if (r.errores.length) throw new Error(r.errores.join('\n')); // así Google avisa por correo cuando el activador falla
+  } finally { bloqueo.releaseLock(); BLOQUEADO_ = false; }
+}
+
 function instalarActivadorDiario() {
-  exigirAdminOEditor_();
-  ScriptApp.getProjectTriggers().forEach(function (t) { if (t.getHandlerFunction() === 'sincronizarDrive') ScriptApp.deleteTrigger(t); });
-  ScriptApp.newTrigger('sincronizarDrive').timeBased().everyDays(1).atHour(6).create();
+  exigirEditor_();
+  ScriptApp.getProjectTriggers().forEach(function (t) { var f = t.getHandlerFunction(); if (f === 'sincronizarDrive' || f === 'sincronizarDriveProgramado') ScriptApp.deleteTrigger(t); });
+  ScriptApp.newTrigger('sincronizarDriveProgramado').timeBased().everyDays(1).atHour(6).create();
+}
+
+/**
+ * Crea el primer administrador con usuario y contraseña (usuario «admin»). Ejecútela una vez desde el editor y copie la contraseña del registro;
+ * luego entre a la plataforma, cámbiela en «Mi cuenta» y cree desde «Accesos» a las demás personas.
+ */
+function crearAdministrador() {
+  exigirEditor_();
+  var x = nucleo_(), r = x.nucleo.crearUsuario({ nombre: 'Administrador SIAU', usuario: 'admin', rol: 'admin' });
+  console.log('Usuario: ' + r.usuario + '\nContraseña: ' + r.clave + '\n(Se muestra una sola vez. Cámbiela al entrar.)');
+  return { usuario: r.usuario, clave: r.clave };
+}
+
+/** Si olvida la contraseña del administrador: genera una nueva para el usuario «admin». */
+function reiniciarClaveAdministrador() {
+  exigirEditor_();
+  var x = nucleo_(), r = x.nucleo.restablecerClave('admin');
+  console.log('Usuario: admin\nContraseña nueva: ' + r.clave);
+  return r;
 }
 
 /** Muestra en el registro cómo quedó la instalación (sin datos personales). */
 function diagnosticar() {
-  exigirAdminOEditor_();
+  exigirEditor_();
   var p = propiedades_().getProperties(), s = [];
   ['ID_BASE', 'ID_FOTOS', 'ID_CHARLAS', 'ID_BUZON', 'ID_NPS', 'ID_MEDICA', 'ID_ILSC'].forEach(function (k) { s.push(k + ': ' + (p[k] ? 'configurado' : 'FALTA')); });
   s.push('ADMINS: ' + listaCorreos_('ADMINS').length + ' correo(s) · VISORES: ' + listaCorreos_('VISORES').length + ' correo(s)');
@@ -469,6 +513,7 @@ function diagnosticar() {
  * Si muestra una cuenta personal: cierre todo y repita en una ventana de incógnito con solo siau@miredips.org.
  */
 function verificarCuenta() {
+  exigirEditor_();
   var activa = '', efectiva = '';
   try { activa = String(Session.getActiveUser().getEmail() || ''); } catch (e) { activa = '(no disponible)'; }
   try { efectiva = String(Session.getEffectiveUser().getEmail() || ''); } catch (e) { efectiva = '(no disponible)'; }

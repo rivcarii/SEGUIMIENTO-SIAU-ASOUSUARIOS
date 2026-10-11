@@ -2,29 +2,38 @@ import { abrirLibro } from "../shared/xlsx.js";
 import { prepararLibro, ETIQUETAS } from "../shared/preparar.js";
 import { selectorMes, selectorFecha } from "../shared/selectores.js";
 import { formEvidencia } from "../shared/formevidencia.js";
-import { api, h, fechaHoy, fmtFecha, mesActual, opciones, pintarMarca, mascota, tituloGrande } from "../shared/comun.js";
+import { pantallaIngreso, pintarSesion } from "../shared/ingreso.js";
+import { api, h, alSesionVencida, fechaHoy, fmtFecha, mesActual, opciones, pintarMarca, mascota, tituloGrande } from "../shared/comun.js";
 
 const app = document.getElementById("app");
 let cfg, seccion = "nueva", titulo;
 const aviso = (el, ok, texto) => el.replaceChildren(h("div", { class: "msg " + (ok ? "ok" : "err") }, texto));
 
+function pedirIngreso(aviso = "", mensajeRol = null) {
+  document.getElementById("sesionInfo").hidden = true;
+  app.replaceChildren(pantallaIngreso({ aviso, mensajeRol, alEntrar: () => iniciar() }));
+}
+alSesionVencida(() => pedirIngreso("Su sesión terminó. Ingrese de nuevo."));
+
 async function iniciar() {
   app.replaceChildren(h("div", { class: "cargando-centro", role: "status" }, h("span", { class: "rueda" }), "Abriendo el administrador…"));
-  try {
-    const s = await api("/api/sesion");
-    if (s.rol !== "admin") throw new Error("Solo los administradores pueden entrar aquí.");
-    cfg = await api("/api/config");
-  } catch (e) { return app.replaceChildren(h("div", { class: "login" }, mascota("celular", 170), h("div", { class: "card" }, h("h2", {}, "No se pudo abrir"), h("p", {}, e.message)))); }
+  let s;
+  try { s = await api("/api/sesion"); cfg = s.rol === "admin" ? await api("/api/config") : null; }
+  catch (e) { return app.replaceChildren(h("div", { class: "login" }, mascota("celular", 170), h("div", { class: "card" }, h("h2", {}, "No se pudo abrir"), h("p", {}, e.message)))); }
+  if (!s.rol) return pedirIngreso();
+  if (s.rol !== "admin") return app.replaceChildren(h("div", { class: "login" }, mascota("atento", 170), h("div", { class: "card" }, h("h2", {}, "Solo para administradores"), h("p", {}, "Su usuario puede consultar la plataforma pero no administrarla."),
+    h("p", {}, h("a", { class: "btn", href: window.PLATAFORMA.app, target: "_top" }, "Ir al visor")))));
   pintarMarca(cfg.marca);
+  pintarSesion(document.getElementById("sesionInfo"), s, () => pedirIngreso());
   titulo = tituloGrande("Panel de administración · 2026", "Administrador de evidencias");
   render();
 }
 
-const SECCIONES = [["nueva", "Nueva evidencia"], ["lista", "Evidencias"], ["importar", "Consolidados"], ["personal", "Personal y rotación"], ["catalogos", "Sedes y técnicos"], ["metas", "Metas"], ["marca", "Nombres"]];
+const SECCIONES = [["nueva", "Nueva evidencia"], ["lista", "Evidencias"], ["importar", "Consolidados"], ["personal", "Personal y rotación"], ["catalogos", "Sedes y técnicos"], ["metas", "Metas"], ["accesos", "Accesos"], ["marca", "Nombres"]];
 function render() {
   const cont = h("div");
   app.replaceChildren(titulo.el, h("nav", { class: "tabs glass" }, SECCIONES.map(([k, n]) => h("button", { "aria-pressed": k === seccion, onclick: () => { seccion = k; render(); } }, n))), cont);
-  ({ nueva: nuevaEvidencia, lista: listaEvidencias, importar, personal, catalogos, metas, marca })[seccion](cont);
+  ({ nueva: nuevaEvidencia, lista: listaEvidencias, importar, personal, catalogos, metas, accesos, marca })[seccion](cont);
 }
 
 // ---- Nueva / editar evidencia (el formulario es el mismo de la Fototeca del visor)
@@ -185,3 +194,36 @@ async function personal(cont) {
 }
 
 iniciar();
+
+// ---- Accesos: personas que entran con usuario y contraseña (sin cuenta de Google de la organización)
+async function accesos(cont) {
+  const msg = h("div"), lista = h("div"), nombre = h("input", { type: "text", placeholder: "Nombre completo", autocomplete: "off" }), usuario = h("input", { type: "text", placeholder: "Usuario (opcional)", autocomplete: "off", autocapitalize: "none" });
+  const rol = h("select", {}, h("option", { value: "visor" }, "Consulta (solo ve)"), h("option", { value: "admin" }, "Administración (ve y edita)"));
+  const invitacion = (u, clave) => `Plataforma de evidencias SIAU · MiRed IPS\nEnlace: ${window.PLATAFORMA.app}\nUsuario: ${u}\nContraseña: ${clave}\nPuede cambiarla en «Mi cuenta» después de entrar.`;
+  const mostrarCredencial = (u, clave, titulo) => {
+    const copiar = h("button", { class: "btn sec", onclick: async () => { try { await navigator.clipboard.writeText(invitacion(u, clave)); copiar.textContent = "¡Copiado!"; } catch { copiar.textContent = "No se pudo copiar"; } setTimeout(() => { copiar.textContent = "Copiar invitación"; }, 2000); } }, "Copiar invitación");
+    msg.replaceChildren(h("div", { class: "credencial", role: "status" }, h("b", {}, titulo), h("dl", {}, h("dt", {}, "Usuario"), h("dd", {}, u), h("dt", {}, "Contraseña"), h("dd", {}, clave)),
+      h("p", { class: "mut", style: "margin:8px 0" }, "Anótela ahora: por seguridad no se vuelve a mostrar. Si se pierde, reinicie la contraseña."), copiar));
+  };
+  async function cargar() {
+    let us;
+    try { us = await api("/api/admin/usuarios"); } catch (e) { return lista.replaceChildren(h("div", { class: "msg err" }, e.message)); }
+    const accion = (u, etq, fn, clase = "btn sec") => h("button", { class: clase, onclick: async () => { try { await fn(); } catch (e) { aviso(msg, false, e.message); } } }, etq);
+    lista.replaceChildren(us.length ? h("div", { class: "card scroll" }, h("table", {}, h("thead", {}, h("tr", {}, ["Nombre", "Usuario", "Rol", "Estado", ""].map((t) => h("th", {}, t)))),
+      h("tbody", {}, us.map((u) => h("tr", {}, h("td", {}, u.nombre), h("td", {}, u.usuario), h("td", {}, u.rol === "admin" ? "Administración" : "Consulta"), h("td", {}, u.activo ? "Activo" : "Desactivado"),
+        h("td", {}, accion(u, "Reiniciar contraseña", async () => { if (!confirm(`¿Generar una contraseña nueva para ${u.nombre}? La anterior dejará de servir.`)) return; const r = await api("/api/admin/usuarios/" + u.id, { method: "PUT", json: { reiniciar: true } }); mostrarCredencial(u.usuario, r.clave, "Contraseña nueva de " + u.nombre); }), " ",
+          accion(u, u.activo ? "Desactivar" : "Activar", async () => { await api("/api/admin/usuarios/" + u.id, { method: "PUT", json: { activo: !u.activo } }); cargar(); }), " ",
+          accion(u, "Eliminar", async () => { if (!confirm(`¿Eliminar a ${u.nombre}? Ya no podrá entrar.`)) return; await api("/api/admin/usuarios/" + u.id, { method: "DELETE" }); cargar(); }, "btn del"))))))) : h("div", { class: "card vacio" }, "Aún no hay personas con acceso por contraseña."));
+  }
+  const crear = h("button", { class: "btn", onclick: async () => {
+    if (!nombre.value.trim()) return aviso(msg, false, "Escriba el nombre de la persona.");
+    crear.disabled = true;
+    try { const r = await api("/api/admin/usuarios", { json: { nombre: nombre.value, usuario: usuario.value, rol: rol.value } }); mostrarCredencial(r.usuario, r.clave, "Acceso creado para " + r.nombre); nombre.value = usuario.value = ""; cargar(); }
+    catch (e) { aviso(msg, false, e.message); }
+    crear.disabled = false;
+  } }, "Crear acceso");
+  cont.replaceChildren(msg, h("div", { class: "card" }, h("h3", {}, "Dar acceso a una persona"),
+    h("p", { class: "mut" }, "Se genera una contraseña de 14 caracteres que usted entrega a la persona. Quien tenga rol «Consulta» solo ve la plataforma; no puede cambiar nada."),
+    h("div", { class: "row" }, h("div", {}, h("label", {}, "Nombre"), nombre), h("div", {}, h("label", {}, "Usuario"), usuario), h("div", {}, h("label", {}, "Rol"), rol)), h("p", {}, crear)), lista);
+  cargar();
+}

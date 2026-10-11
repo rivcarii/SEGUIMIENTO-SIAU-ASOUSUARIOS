@@ -1,9 +1,10 @@
-import { api, h, mesActual, fmtFecha, opciones, pintarMarca, mascota, tituloGrande, mesLegible, recurso, sk, skTarjetas } from "../shared/comun.js";
+import { api, h, alSesionVencida, mesActual, fmtFecha, opciones, pintarMarca, mascota, tituloGrande, mesLegible, recurso, sk, skTarjetas } from "../shared/comun.js";
 import { selectorMes } from "../shared/selectores.js";
 import { vistaPanel } from "./panel.js";
 import { vistaConsultas } from "./consultas.js";
 import { vistaFototeca } from "./fototeca.js";
 import { cargarFicha } from "./ficha.js";
+import { pantallaIngreso, pintarSesion } from "../shared/ingreso.js";
 import { construirReporte, descargarReporte } from "../shared/reporte.js";
 
 const app = document.getElementById("app"), dlg = document.getElementById("dlg"), dlgc = document.getElementById("dlgc"), tabbar = document.getElementById("tabbar");
@@ -11,15 +12,28 @@ const S = { cfg: null, area: "siau", vista: "panel", mes: mesActual(), filtros: 
 const AREAS = ["siau", "asociacion"];
 let tg, seg, segThumb, cont, tabThumb;
 
+function pedirIngreso(aviso = "") {
+  tabbar.hidden = true; document.getElementById("irAdmin").hidden = true; document.getElementById("sesionInfo").hidden = true;
+  document.querySelector(".nav-titulo").textContent = "";
+  app.replaceChildren(pantallaIngreso({ aviso, alEntrar: () => iniciar() }));
+}
+alSesionVencida(() => pedirIngreso("Su sesión terminó. Ingrese de nuevo."));
+
 async function iniciar() {
   pintarMarca({ nombre_siau: "SIAU", nombre_asociacion: "Asociación de Usuarios" });
   app.replaceChildren(h("div", { class: "cargando", role: "status", "aria-label": "Abriendo la plataforma" },
     sk("", "height:14px;width:190px;margin:10px 0 12px"), sk("", "height:46px;width:min(420px,70%);border-radius:14px;margin-bottom:22px"), sk("", "height:46px;width:min(640px,100%);border-radius:999px;margin-bottom:22px"),
     sk("l-tira", "height:92px;border-radius:22px"), h("div", { class: "cargando-centro" }, h("span", { class: "rueda" }), "Abriendo la plataforma…")));
-  try { [S.cfg, S.rol] = await Promise.all([api("/api/config"), api("/api/sesion").then((u) => u.rol).catch(() => null)]); }
+  let sesion;
+  try { sesion = await api("/api/sesion"); }
+  catch (e) { return app.replaceChildren(h("div", { class: "login" }, mascota("atento", 170), h("div", { class: "card" }, h("h2", {}, "No se pudo abrir"), h("p", {}, e.message)))); }
+  if (!sesion.rol) return pedirIngreso();
+  S.rol = sesion.rol;
+  try { S.cfg = await api("/api/config"); }
   catch (e) { return app.replaceChildren(h("div", { class: "login" }, mascota("atento", 170), h("div", { class: "card" }, h("h2", {}, "No se pudo abrir"), h("p", {}, e.message)))); }
   pintarMarca(S.cfg.marca);
-  if (S.rol === "admin") document.getElementById("irAdmin").hidden = false;
+  document.getElementById("irAdmin").hidden = S.rol !== "admin";
+  pintarSesion(document.getElementById("sesionInfo"), sesion, pedirIngreso);
   S.rerender = render;
   montar();
   render();

@@ -2,6 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import vm from "node:vm";
+import { createHash, createHmac, randomUUID } from "node:crypto";
 import { construir } from "../google/construir.mjs";
 
 const CODIGO = construir();
@@ -64,7 +65,9 @@ function entorno({ usuario = "siau@miredips.org", dueno = "siau@miredips.org", p
     MimeType: { GOOGLE_SHEETS: "application/vnd.google-apps.spreadsheet" },
     Utilities: {
       base64Decode: (s) => Buffer.from(s, "base64"), base64Encode: (b) => Buffer.from(b).toString("base64"),
-      newBlob: (bytes, tipo, nombre) => ({ bytes, tipo, nombre }),
+      newBlob: (bytes, tipo, nombre) => ({ bytes, tipo, nombre, getBytes: () => (typeof bytes === "string" ? Buffer.from(bytes) : bytes) }),
+      computeHmacSha256Signature: (v, k) => createHmac("sha256", k).update(v).digest(),
+      computeDigest: (_, t) => createHash("sha256").update(t).digest(), DigestAlgorithm: { SHA_256: "SHA_256" }, getUuid: () => randomUUID(),
       formatDate: (d, _z, fmt) => (fmt === "yyyy-MM-dd" ? "2026-09-30" : "2026-09-30 12:00:00"),
     },
     HtmlService: { XFrameOptionsMode: { ALLOWALL: 1 }, createHtmlOutput: (html) => { const o = { html, titulo: "" }; o.setTitle = (t) => { o.titulo = t; return o; }; o.addMetaTag = () => o; o.setXFrameOptionsMode = () => o; return o; } },
@@ -126,12 +129,11 @@ test("permisos: sin correo o fuera de las listas no hay acceso; un visor no admi
     assert.equal(e.llamar("GET", "/api/config").ok, esperado.cfg, usuario);
     assert.equal(e.llamar("POST", "/api/admin/tecnicos", { cuerpo: { nombre: "X" } }).ok, esperado.admin, usuario);
     assert.equal(e.llamar("POST", "/api/admin/sincronizar-drive").ok, false);
-    const pag = e.ctx.doGet({ parameter: {} });
-    assert.equal(/Sin acceso/.test(pag.html), !esperado.cfg, usuario);
+    if (!esperado.cfg) assert.equal(e.llamar("GET", "/api/config").estado, usuario ? 403 : 401, usuario);
   }
 });
 
-test("doGet: sirve el visor y, solo a administradores, el administrador; sustituye las direcciones", () => {
+test("doGet: la página es pública (sin datos), sustituye las direcciones y sirve visor y administrador", () => {
   const e = entorno();
   e.ctx.configurar();
   const v = e.ctx.doGet({ parameter: {} });
@@ -228,13 +230,13 @@ test("activador diario: se instala una sola vez", () => {
   const e = entorno();
   e.ctx.instalarActivadorDiario(); e.ctx.instalarActivadorDiario();
   assert.equal(e.triggers.length, 1);
-  assert.equal(e.triggers[0].getHandlerFunction(), "sincronizarDrive");
+  assert.equal(e.triggers[0].getHandlerFunction(), "sincronizarDriveProgramado");
 });
 
 test("mantenimiento: un visor no puede ejecutar funciones de administración desde el navegador; verificarCuenta informa la cuenta", () => {
   const base = entorno(); base.ctx.configurar();
   const e = entorno({ usuario: "lector@miredips.org", props: { ...base.propiedades, VISORES: "lector@miredips.org" } });
-  for (const fn of ["configurar", "autoconfigurar", "sincronizarDrive", "instalarActivadorDiario", "diagnosticar"]) assert.throws(() => e.ctx[fn](), /administradores/, fn);
+  for (const fn of ["configurar", "autoconfigurar", "sincronizarDrive", "instalarActivadorDiario", "diagnosticar"]) assert.throws(() => e.ctx[fn](), /editor/, fn);
   const v = base.ctx.verificarCuenta();
   assert.ok(v.some((l) => /siau@miredips\.org/.test(l)) && v.some((l) => /✔ La cuenta es institucional/.test(l)));
 });
@@ -278,4 +280,57 @@ test("caché: la segunda lectura no va a la Hoja; cualquier escritura la invalid
   assert.equal(sedes(), 40); // sigue leyendo lo guardado en caché
   e.llamar("POST", "/api/admin/tecnicos", { cuerpo: { nombre: "Nueva Persona" } }); // cualquier escritura limpia la caché
   assert.equal(sedes(), 41);
+});
+
+// ── Acceso con usuario y contraseña (personas sin cuenta de la organización)
+test("web pública: un visitante anónimo no ejecuta funciones de mantenimiento ni lee datos; solo ve el formulario de ingreso", () => {
+  const base = entorno({ cache: true }); base.ctx.configurar();
+  const anon = entorno({ usuario: "", props: base.propiedades, cache: true });
+  for (const [id, l] of base.hojasPorLibro) anon.hojasPorLibro.set(id, l);
+  for (const [id, f] of base.archivosPorId) anon.archivosPorId.set(id, f);
+  for (const fn of ["configurar", "autoconfigurar", "sincronizarDrive", "instalarActivadorDiario", "diagnosticar", "verificarCuenta", "crearAdministrador", "reiniciarClaveAdministrador"]) assert.throws(() => anon.ctx[fn](), /editor/, fn);
+  assert.ok(!anon.ctx.doGet({ parameter: {} }).html.includes("Sin acceso"));
+  assert.equal(anon.llamar("GET", "/api/config").estado, 401);
+  assert.equal(anon.llamar("GET", "/api/sesion").datos.rol, null);
+  assert.notEqual(anon.llamar("POST", "/api/admin/sincronizar-drive").ok, true);
+});
+
+test("crearAdministrador + inicio de sesión de punta a punta, con la contraseña verificada en la caché y las sedes de la base", () => {
+  const e = entorno({ cache: true }); e.ctx.configurar();
+  const { usuario, clave } = e.ctx.crearAdministrador();
+  assert.equal(usuario, "admin"); assert.match(clave, /^[a-km-np-z2-9]{14}$/);
+  assert.ok(!JSON.stringify([...e.hojasPorLibro.values()].map((l) => [...l.hojas.values()].map((h) => h.datos))).includes(clave)); // la contraseña no se guarda
+  const anon = entorno({ usuario: "", props: e.propiedades, cache: true });
+  for (const [id, l] of e.hojasPorLibro) anon.hojasPorLibro.set(id, l);
+  for (const [id, f] of e.archivosPorId) anon.archivosPorId.set(id, f);
+  const mal = anon.llamar("POST", "/api/login", { cuerpo: { usuario: "admin", clave: "incorrecta" } });
+  assert.deepEqual([mal.ok, mal.estado], [false, 401]);
+  const ok = anon.llamar("POST", "/api/login", { cuerpo: { usuario: "admin", clave } });
+  assert.equal(ok.ok, true); assert.equal(ok.datos.rol, "admin");
+  const conToken = (metodo, ruta, cuerpo) => JSON.parse(anon.ctx.llamar(JSON.stringify({ metodo, ruta, cuerpo, token: ok.datos.token })));
+  assert.equal(conToken("GET", "/api/config").datos.sedes.length, 40);
+  assert.equal(conToken("GET", "/api/sesion").datos.nombre, "Administrador SIAU");
+  // el administrador crea a una persona de solo lectura; esa persona entra y no puede administrar
+  const nueva = conToken("POST", "/api/admin/usuarios", { nombre: "Persona Externa", rol: "visor" }).datos;
+  const v = anon.llamar("POST", "/api/login", { cuerpo: { usuario: nueva.usuario, clave: nueva.clave } }).datos;
+  const comoVisor = (metodo, ruta, cuerpo) => JSON.parse(anon.ctx.llamar(JSON.stringify({ metodo, ruta, cuerpo, token: v.token })));
+  assert.equal(comoVisor("GET", "/api/panel").ok, true);
+  assert.equal(comoVisor("GET", "/api/admin/usuarios").estado, 403);
+  assert.equal(comoVisor("POST", "/api/admin/tecnicos", { nombre: "X" }).estado, 403);
+  // cerrar sesión
+  anon.llamar("POST", "/api/logout", { cuerpo: {} });
+  JSON.parse(anon.ctx.llamar(JSON.stringify({ metodo: "POST", ruta: "/api/logout", cuerpo: {}, token: v.token })));
+  assert.equal(comoVisor("GET", "/api/config").estado, 401);
+  // contraseña olvidada del administrador
+  assert.match(e.ctx.reiniciarClaveAdministrador().clave, /^[a-km-np-z2-9]{14}$/);
+});
+
+test("activador programado: lee los consolidados como máximo una vez cada 30 minutos", () => {
+  const e = entorno({ cache: true, archivos: archivosDrive() }); e.ctx.configurar();
+  e.logs.length = 0;
+  try { e.ctx.sincronizarDriveProgramado(); } catch (x) { /* faltan consolidados en el entorno de prueba */ }
+  const primera = e.logs.length;
+  assert.ok(primera > 0);
+  e.ctx.sincronizarDriveProgramado();
+  assert.equal(e.logs.length, primera); // segunda llamada seguida: no hace nada
 });

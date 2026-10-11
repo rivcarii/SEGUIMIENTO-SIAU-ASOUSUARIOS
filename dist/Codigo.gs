@@ -752,7 +752,11 @@ function sembrarRotacion(almacen) {
   }
 }
 
-function crearNucleo({ almacen, fotos, hoy = () => new Date().toLocaleDateString("sv"), ahora = () => new Date().toISOString().replace("T", " ").slice(0, 19) }) {
+/**
+ * seguridad (opcional; sin ella no hay acceso con usuario y contraseña):
+ *   hash(clave, sal) → texto (derivación lenta) · resumen(texto) → texto (rápido) · azar(bytes) → hex · kv: { get(k), put(k, v, segundos), del(k) } (sesiones e intentos)
+ */
+function crearNucleo({ almacen, fotos, hoy = () => new Date().toLocaleDateString("sv"), ahora = () => new Date().toISOString().replace("T", " ").slice(0, 19), seguridad = null }) {
   const T = (n) => almacen.tabla(n);
   const ajuste = (k, d = "") => T("ajustes").todos().find((a) => a.id === k)?.valor ?? d;
   const setAjuste = (k, v) => { const t = T("ajustes"); if (t.todos().some((a) => a.id === k)) t.actualizar(k, { valor: String(v) }); else t.insertar({ id: k, valor: String(v) }); };
@@ -981,9 +985,69 @@ function crearNucleo({ almacen, fotos, hoy = () => new Date().toLocaleDateString
     return { mes, tecnicos, sin_cobertura: cumplimiento(mes).siau.sin_cobertura, sin_reconocer: [...conteo].map(([t, n]) => ({ t, n })).sort((a, b) => b.n - a.n) };
   }
 
+  // ───────── Acceso con usuario y contraseña (para quien no tiene cuenta de Google de la organización)
+  const ALFABETO = "abcdefghjkmnpqrstuvwxyz23456789", MSG_LOGIN = "Usuario o contraseña incorrectos.", SESION_SEG = 6 * 3600, MAX_INTENTOS = 5, BLOQUEO_SEG = 900;
+  const ROLES_ACCESO = ["visor", "admin"];
+  const normUsuario = (s) => String(s ?? "").trim().toLowerCase().replace(/[^a-z0-9._-]/g, "");
+  const iguales = (a, b) => { a = String(a); b = String(b); if (a.length !== b.length) return false; let r = 0; for (let i = 0; i < a.length; i++) r |= a.charCodeAt(i) ^ b.charCodeAt(i); return r === 0; };
+  const seg = () => { if (!seguridad) throw new ErrorHttp(501, "El acceso con usuario y contraseña no está disponible."); return seguridad; };
+  const claveNueva = () => { const h = seg().azar(16); let c = ""; for (let i = 0; i < 14; i++) c += ALFABETO[parseInt(h.slice(2 * i, 2 * i + 2), 16) % ALFABETO.length]; return c; };
+  const publico = (u) => ({ id: u.id, usuario: u.usuario, nombre: u.nombre, rol: u.rol, activo: Number(u.activo), creado: u.creado });
+  const usuarioDe = (u) => ({ email: u.usuario, nombre: u.nombre, rol: u.rol, via: "clave", id: u.id });
+
+  /** Crea una persona con acceso por contraseña. Devuelve la contraseña generada (única vez que se ve). */
+  function crearUsuario({ nombre, usuario, rol = "visor" }) {
+    const S = seg(), nom = txt(nombre, 120, true);
+    if (!ROLES_ACCESO.includes(rol)) throw bad("Rol inválido");
+    const tabla = T("usuarios"), usados = new Set(tabla.todos().map((u) => u.usuario));
+    let id_ = normUsuario(usuario);
+    if (!id_) { const p = normalizar(nom).split(" ").filter(Boolean); id_ = normUsuario(p.length > 1 ? `${p[0]}.${p[1]}` : p[0]) || "usuario"; }
+    if (id_.length < 3 || id_.length > 40) throw bad("El usuario debe tener entre 3 y 40 caracteres (letras, números, punto, guion).");
+    if (usados.has(id_)) { if (usuario) throw bad("Ese usuario ya existe"); let n = 2; while (usados.has(`${id_}${n}`)) n++; id_ = `${id_}${n}`; }
+    const clave = claveNueva(), sal = S.azar(16);
+    const id = tabla.insertar({ usuario: id_, nombre: nom, rol, activo: 1, sal, hash: S.hash(clave, sal), creado: ahora() });
+    return { id, usuario: id_, nombre: nom, rol, clave };
+  }
+
+  function iniciarSesion(b) {
+    const S = seg(), usuario = normUsuario(b.usuario), clave = String(b.clave ?? "");
+    if (!usuario || !clave || clave.length > 200) throw new ErrorHttp(401, MSG_LOGIN);
+    const kInt = "i:" + usuario, intentos = Number(S.kv.get(kInt) ?? 0);
+    if (intentos >= MAX_INTENTOS) throw new ErrorHttp(429, "Demasiados intentos fallidos. Espere 15 minutos o pida que restablezcan su contraseña.");
+    const u = T("usuarios").todos().find((x) => x.usuario === usuario);
+    const h = S.hash(clave, u ? u.sal : "sal-ficticia-para-igualar-el-tiempo"); // se calcula siempre: tarda lo mismo exista o no el usuario
+    if (!u || !Number(u.activo) || !iguales(h, u.hash)) { S.kv.put(kInt, String(intentos + 1), BLOQUEO_SEG); throw new ErrorHttp(401, MSG_LOGIN); }
+    S.kv.del(kInt);
+    const token = S.azar(24);
+    S.kv.put("s:" + S.resumen(token), JSON.stringify({ id: u.id }), SESION_SEG);
+    return { token, rol: u.rol, nombre: u.nombre, usuario: u.usuario };
+  }
+
+  /** Token de sesión → { email, nombre, rol, via } o null (vencido, cerrado o usuario desactivado). */
+  function identificar(token) {
+    if (!seguridad || typeof token !== "string" || token.length < 20 || token.length > 200) return null;
+    const v = seguridad.kv.get("s:" + seguridad.resumen(token));
+    if (!v) return null;
+    const u = T("usuarios").todos().find((x) => x.id === JSON.parse(v).id);
+    return u && Number(u.activo) ? usuarioDe(u) : null;
+  }
+
+  function cambiarClave(usuario, b) {
+    const S = seg();
+    if (usuario?.via !== "clave") throw bad("Su cuenta entra con Google: la contraseña no aplica.");
+    const u = T("usuarios").todos().find((x) => x.id === usuario.id), nueva = String(b.nueva ?? "");
+    if (!u || !iguales(S.hash(String(b.actual ?? ""), u.sal), u.hash)) throw new ErrorHttp(401, "La contraseña actual no es correcta.");
+    if (nueva.length < 10 || nueva.length > 100) throw bad("La contraseña nueva debe tener al menos 10 caracteres.");
+    const sal = S.azar(16);
+    almacen.atomico(() => T("usuarios").actualizar(u.id, { sal, hash: S.hash(nueva, sal) }));
+    almacen.guardar();
+    return { ok: true };
+  }
+
   // ───────── Enrutador
   function exigir(usuario, nivel) {
     const rol = usuario?.rol;
+    if (!usuario?.email) throw new ErrorHttp(401, "Inicie sesión para continuar.");
     if (nivel === "admin" ? rol !== "admin" : !["admin", "visor"].includes(rol)) throw new ErrorHttp(403, nivel === "admin" ? "Solo los administradores pueden hacer esto." : "No tiene acceso a esta plataforma. Pida que agreguen su correo.");
   }
 
@@ -991,7 +1055,10 @@ function crearNucleo({ almacen, fotos, hoy = () => new Date().toLocaleDateString
   function manejar(req, usuario) {
     const m = req.metodo, p = req.ruta, q = req.q ?? {}, b = req.cuerpo ?? {};
     let r;
-    if (m === "GET" && p === "/api/sesion") return { rol: usuario?.rol ?? null, email: usuario?.email ?? "" };
+    if (m === "GET" && p === "/api/sesion") return { rol: usuario?.rol ?? null, email: usuario?.email ?? "", nombre: usuario?.nombre ?? "", via: usuario?.via ?? (usuario?.email ? "google" : null), clave_disponible: Boolean(seguridad) };
+    if (m === "POST" && p === "/api/login") return iniciarSesion(b);
+    if (m === "POST" && p === "/api/logout") { if (seguridad && typeof req.token === "string") seguridad.kv.del("s:" + seguridad.resumen(req.token)); return { ok: true }; }
+    if (m === "POST" && p === "/api/clave") { exigir(usuario, "visor"); return cambiarClave(usuario, b); }
 
     if (m === "GET" && p === "/api/config") { exigir(usuario, "visor"); return config(); }
     if (m === "GET" && p === "/api/evidencias") { exigir(usuario, "visor"); return listarEvidencias(q); }
@@ -1068,10 +1135,38 @@ function crearNucleo({ almacen, fotos, hoy = () => new Date().toLocaleDateString
     });
     if ((r = /^\/api\/admin\/ausencias\/(\d+)$/.exec(p)) && m === "DELETE") return escribir(() => { T("ausencias").borrar(Number(r[1])); return { ok: true }; });
     if (m === "POST" && p === "/api/admin/importar") return escribir(() => sincronizar(b));
+
+    if (m === "GET" && p === "/api/admin/usuarios") return T("usuarios").todos().map(publico).sort((a, c) => enOrden(a.nombre, c.nombre));
+    if (m === "POST" && p === "/api/admin/usuarios") return escribir(() => crearUsuario(b));
+    if ((r = /^\/api\/admin\/usuarios\/(\d+)$/.exec(p))) {
+      const id = Number(r[1]), u = T("usuarios").todos().find((x) => x.id === id);
+      if (!u) throw new ErrorHttp(404, "No existe");
+      const yo = usuario.via === "clave" && usuario.id === id;
+      if (m === "PUT") return escribir(() => {
+        const parche = {}, salida = { ok: true };
+        if (b.nombre) parche.nombre = txt(b.nombre, 120);
+        if (b.rol != null) { if (!ROLES_ACCESO.includes(b.rol)) throw bad("Rol inválido"); if (yo && b.rol !== "admin") throw bad("No puede quitarse a sí mismo el rol de administrador."); parche.rol = b.rol; }
+        if (b.activo != null) { if (yo && !b.activo) throw bad("No puede desactivar su propia cuenta."); parche.activo = Number(Boolean(b.activo)); }
+        if (b.reiniciar) { const S = seg(), clave = claveNueva(), sal = S.azar(16); parche.sal = sal; parche.hash = S.hash(clave, sal); salida.clave = clave; }
+        T("usuarios").actualizar(id, parche);
+        return salida;
+      });
+      if (m === "DELETE") return escribir(() => { if (yo) throw bad("No puede eliminar su propia cuenta."); T("usuarios").borrar(id); return { ok: true }; });
+    }
     throw new ErrorHttp(404, "No encontrado");
   }
 
-  return { manejar, sincronizar: (b) => { const x = sincronizar(b); almacen.guardar(); return x; }, estado, cumplimiento };
+  /** Uso interno (editor de Apps Script): nueva contraseña para una persona. */
+  function restablecerClave(usuario) {
+    const S = seg(), u = T("usuarios").todos().find((x) => x.usuario === normUsuario(usuario));
+    if (!u) throw new ErrorHttp(404, "No existe ese usuario");
+    const clave = claveNueva(), sal = S.azar(16);
+    almacen.atomico(() => T("usuarios").actualizar(u.id, { sal, hash: S.hash(clave, sal), activo: 1 }));
+    almacen.guardar();
+    return { usuario: u.usuario, clave };
+  }
+
+  return { manejar, identificar, restablecerClave, crearUsuario: (d) => { const x = almacen.atomico(() => crearUsuario(d)); almacen.guardar(); return x; }, sincronizar: (b) => { const x = sincronizar(b); almacen.guardar(); return x; }, estado, cumplimiento };
 }
 
 return { VERSION_DATOS, ErrorHttp, inicializar, crearNucleo };
@@ -1079,8 +1174,8 @@ return { VERSION_DATOS, ErrorHttp, inicializar, crearNucleo };
 
 const { ErrorHttp, crearNucleo, inicializar, VERSION_DATOS } = M_api;
 
-const PLANTILLA_VISOR = "<!doctype html>\n<html lang=\"es\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1,viewport-fit=cover\">\n<title>Evidencias SIAU</title><base target=\"_top\"><link rel=\"icon\" href=\"{{R}}/shared/marca/medalla.png\"><link rel=\"stylesheet\" href=\"{{R}}/shared/estilos.css\"></head>\n<body class=\"tiene-tabbar\">\n<script>window.PLATAFORMA = { base: \"{{R}}\", app: \"{{APP}}\" };</script>\n<div class=\"fondo\" aria-hidden=\"true\"></div>\n<header class=\"nav glass\" id=\"nav\"><div class=\"logos\" id=\"logos\"></div><span class=\"nav-titulo\"></span><a id=\"irAdmin\" href=\"{{APP}}?pagina=admin\" target=\"_top\" hidden>Administrar</a></header>\n<main id=\"app\"></main>\n<nav class=\"tabbar glass\" id=\"tabbar\" aria-label=\"Módulos\" hidden></nav>\n<dialog id=\"dlg\"><div class=\"in\" id=\"dlgc\"></div></dialog>\n<script type=\"module\" src=\"{{R}}/visor/app.js\"></script>\n</body></html>\n";
-const PLANTILLA_ADMIN = "<!doctype html>\n<html lang=\"es\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1,viewport-fit=cover\">\n<title>Administrador de evidencias</title><base target=\"_top\"><link rel=\"icon\" href=\"{{R}}/shared/marca/medalla.png\"><link rel=\"stylesheet\" href=\"{{R}}/shared/estilos.css\"></head>\n<body>\n<script>window.PLATAFORMA = { base: \"{{R}}\", app: \"{{APP}}\" };</script>\n<div class=\"fondo\" aria-hidden=\"true\"></div>\n<header class=\"nav glass\" id=\"nav\"><div class=\"logos\" id=\"logos\"></div><span class=\"nav-titulo\"></span><a href=\"{{APP}}\" target=\"_top\">Ver visor</a></header>\n<main id=\"app\"></main>\n<script type=\"module\" src=\"{{R}}/admin/app.js\"></script>\n</body></html>\n";
+const PLANTILLA_VISOR = "<!doctype html>\n<html lang=\"es\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1,viewport-fit=cover\">\n<title>Evidencias SIAU</title><base target=\"_top\"><link rel=\"icon\" href=\"{{R}}/shared/marca/medalla.png\"><link rel=\"stylesheet\" href=\"{{R}}/shared/estilos.css\"></head>\n<body class=\"tiene-tabbar\">\n<script>window.PLATAFORMA = { base: \"{{R}}\", app: \"{{APP}}\" };</script>\n<div class=\"fondo\" aria-hidden=\"true\"></div>\n<header class=\"nav glass\" id=\"nav\"><div class=\"logos\" id=\"logos\"></div><span class=\"nav-titulo\"></span><span id=\"sesionInfo\" class=\"sesion-zona\" hidden></span><a id=\"irAdmin\" href=\"{{APP}}?pagina=admin\" target=\"_top\" hidden>Administrar</a></header>\n<main id=\"app\"></main>\n<nav class=\"tabbar glass\" id=\"tabbar\" aria-label=\"Módulos\" hidden></nav>\n<dialog id=\"dlg\"><div class=\"in\" id=\"dlgc\"></div></dialog>\n<script type=\"module\" src=\"{{R}}/visor/app.js\"></script>\n</body></html>\n";
+const PLANTILLA_ADMIN = "<!doctype html>\n<html lang=\"es\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1,viewport-fit=cover\">\n<title>Administrador de evidencias</title><base target=\"_top\"><link rel=\"icon\" href=\"{{R}}/shared/marca/medalla.png\"><link rel=\"stylesheet\" href=\"{{R}}/shared/estilos.css\"></head>\n<body>\n<script>window.PLATAFORMA = { base: \"{{R}}\", app: \"{{APP}}\" };</script>\n<div class=\"fondo\" aria-hidden=\"true\"></div>\n<header class=\"nav glass\" id=\"nav\"><div class=\"logos\" id=\"logos\"></div><span class=\"nav-titulo\"></span><span id=\"sesionInfo\" class=\"sesion-zona\" hidden></span><a href=\"{{APP}}\" target=\"_top\">Ver visor</a></header>\n<main id=\"app\"></main>\n<script type=\"module\" src=\"{{R}}/admin/app.js\"></script>\n</body></html>\n";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Capa de Google: conecta el núcleo (reglas) con Hojas de cálculo, Drive y la web app.
@@ -1276,12 +1371,31 @@ function usuario_() {
 }
 
 /**
- * Las funciones globales sin «_» al final las puede invocar desde el navegador cualquiera que abra la aplicación.
- * Las de mantenimiento solo corren desde el editor o un activador (sin correo identificable) o para un administrador.
+ * Toda función global sin «_» al final la puede invocar desde el navegador cualquiera que abra la aplicación (que ahora es pública).
+ * Las de mantenimiento solo corren desde el editor de Apps Script: allí quien ejecuta ES la cuenta dueña.
+ * Desde la web esa coincidencia no existe (visitante anónimo o cuenta distinta), así que se rechazan.
  */
-function exigirAdminOEditor_() {
-  var u = usuario_();
-  if (u.email && u.rol !== 'admin') throw new Error('Solo los administradores pueden ejecutar esto.');
+function exigirEditor_() {
+  var activa = '', efectiva = '';
+  try { activa = String(Session.getActiveUser().getEmail() || '').toLowerCase(); efectiva = String(Session.getEffectiveUser().getEmail() || '').toLowerCase(); } catch (e) { activa = ''; }
+  if (!activa || activa !== efectiva) throw new Error('Esta función solo se ejecuta desde el editor de Apps Script, con la cuenta dueña del proyecto.');
+}
+
+/** Servicios de seguridad para el acceso con usuario y contraseña (sesiones e intentos viven en la caché del script). null si no hay caché. */
+function seguridad_() {
+  var cache = null;
+  try { cache = typeof CacheService !== 'undefined' ? CacheService.getScriptCache() : null; } catch (e) { cache = null; }
+  if (!cache) return null;
+  return {
+    hash: function (clave, sal) {
+      var h = Utilities.newBlob(String(clave)).getBytes();
+      for (var i = 0; i < 150; i++) h = Utilities.computeHmacSha256Signature(h, String(sal));
+      return Utilities.base64Encode(h);
+    },
+    resumen: function (t) { return Utilities.base64Encode(Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, String(t))); },
+    azar: function (n) { var s = ''; while (s.length < n * 2) s += Utilities.getUuid().replace(/-/g, ''); return s.slice(0, n * 2); },
+    kv: { get: function (k) { return cache.get(k); }, put: function (k, v, seg) { cache.put(k, v, Math.min(seg, 21600)); }, del: function (k) { cache.remove(k); } },
+  };
 }
 
 var BLOQUEADO_ = false; // true mientras esta ejecución ya tiene el candado del script
@@ -1301,7 +1415,7 @@ function nucleo_() {
   if (!p.ID_BASE || !p.ID_FOTOS) throw new ErrorHttp(500, 'La plataforma no está configurada: ejecute «configurar» en el editor de Apps Script.');
   var almacen = crearAlmacenHojas(SpreadsheetApp.openById(p.ID_BASE));
   asegurarVersion_(almacen);
-  return { almacen: almacen, nucleo: crearNucleo({ almacen: almacen, fotos: crearFotosDrive(p.ID_FOTOS), hoy: hoyBogota_, ahora: ahoraBogota_ }) };
+  return { almacen: almacen, nucleo: crearNucleo({ almacen: almacen, fotos: crearFotosDrive(p.ID_FOTOS), hoy: hoyBogota_, ahora: ahoraBogota_, seguridad: seguridad_() }) };
 }
 
 // ───────────────────────── Páginas web ─────────────────────────
@@ -1311,24 +1425,9 @@ function pagina_(plantilla, titulo) {
   return HtmlService.createHtmlOutput(html).setTitle(titulo).addMetaTag('viewport', 'width=device-width, initial-scale=1').setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
 }
 
-function sinAcceso_(email, motivo) {
-  var dueno = '';
-  try { dueno = String(Session.getEffectiveUser().getEmail() || ''); } catch (e) { dueno = ''; }
-  var texto = email
-    ? 'La cuenta ' + email + ' no tiene acceso a esta plataforma. Pida a un administrador que agregue su correo.'
-    : 'Google no entregó el correo de quien abre la página. Esto pasa cuando el dueño del script es de otro dominio (por ejemplo un Gmail personal) o cuando la implementación no es «Ejecutar como: yo». Cree el proyecto y la implementación desde siau@miredips.org.';
-  var det = 'Cuenta detectada: ' + (email || '(vacía)') + '\nDueño del script: ' + (dueno || '(vacío)') + '\nAdministradores configurados: ' + listaCorreos_('ADMINS').length + '\nVisores configurados: ' + listaCorreos_('VISORES').length + (motivo ? '\nMotivo: ' + motivo : '');
-  var esc = function (t) { return String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;'); };
-  return HtmlService.createHtmlOutput('<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">' +
-    '<body style="font:16px/1.5 system-ui,sans-serif;max-width:36rem;margin:10vh auto;padding:0 1rem;color:#12315f"><h2>Sin acceso</h2><p>' + esc(texto) + '</p>' +
-    '<pre style="background:#eef3f8;padding:12px;border-radius:8px;white-space:pre-wrap;font-size:13px">' + esc(det) + '</pre></body>').setTitle('Sin acceso');
-}
-
+/** La página es pública (no lleva datos): quien no esté identificado ve el formulario de ingreso y los datos solo llegan tras iniciar sesión. */
 function doGet(e) {
-  var u = usuario_();
-  if (!u.rol) return sinAcceso_(u.email);
   var admin = e && e.parameter && e.parameter.pagina === 'admin';
-  if (admin && u.rol !== 'admin') return sinAcceso_(u.email, 'esta página es solo para administradores');
   return pagina_(admin ? PLANTILLA_ADMIN : PLANTILLA_VISOR, admin ? 'Administrador · Evidencias SIAU' : 'Evidencias SIAU');
 }
 
@@ -1339,16 +1438,18 @@ function llamar(texto) {
   try {
     var req = JSON.parse(texto);
     if (!req || typeof req.ruta !== 'string' || typeof req.metodo !== 'string') throw new ErrorHttp(400, 'Solicitud inválida');
-    var u = usuario_();
-    var escribe = req.metodo !== 'GET';
+    var libre = req.ruta === '/api/login' || req.ruta === '/api/logout' || req.ruta === '/api/sesion'; // no escriben en la base: sin candado
+    var escribe = req.metodo !== 'GET' && !libre;
     if (escribe) { bloqueo = LockService.getScriptLock(); bloqueo.waitLock(30000); BLOQUEADO_ = true; }
     var x = nucleo_();
+    var u = usuario_(); // Google (listas ADMINS/VISORES) si la cuenta se identifica; si no, la sesión de usuario y contraseña
+    if (!u.rol && typeof req.token === 'string') { var v = x.nucleo.identificar(req.token); if (v) u = v; }
     var datos;
     if (req.metodo === 'POST' && req.ruta === '/api/admin/sincronizar-drive') {
       if (u.rol !== 'admin') throw new ErrorHttp(403, 'Solo los administradores pueden hacer esto.');
       datos = sincronizarDriveCon_(x.nucleo);
     } else {
-      datos = x.nucleo.manejar({ metodo: req.metodo, ruta: req.ruta, q: req.q || {}, cuerpo: req.cuerpo || {} }, u);
+      datos = x.nucleo.manejar({ metodo: req.metodo, ruta: req.ruta, q: req.q || {}, cuerpo: req.cuerpo || {}, token: req.token }, u);
       if (escribe) x.almacen.guardar();
     }
     return JSON.stringify({ ok: true, datos: datos === undefined ? null : datos });
@@ -1364,7 +1465,7 @@ function llamar(texto) {
 // ───────────────────────── Instalación ─────────────────────────
 /** Ejecútela UNA vez desde el editor: crea la base de datos y la carpeta de fotos, y prepara permisos y enlaces. */
 function configurar() {
-  exigirAdminOEditor_();
+  exigirEditor_();
   var props = propiedades_(), actuales = props.getProperties(), informe = [];
   var dueno = String(Session.getEffectiveUser().getEmail() || '').toLowerCase();
   if (!actuales.ID_BASE) {
@@ -1450,7 +1551,7 @@ function candidatos_(consulta, filtro) {
  * (instale el script con siau@miredips.org) y guarda sus ID. No pisa lo ya configurado.
  */
 function autoconfigurar() {
-  exigirAdminOEditor_();
+  exigirEditor_();
   var props = propiedades_(), actuales = props.getProperties(), informe = [];
   BUSQUEDAS.forEach(function (b) {
     if (actuales[b[0]]) { informe.push(b[0] + ': ya configurado'); return; }
@@ -1514,7 +1615,7 @@ function sincronizarDriveCon_(nucleo) {
 
 /** La ejecuta el activador diario (y también se puede ejecutar a mano). */
 function sincronizarDrive() {
-  exigirAdminOEditor_();
+  exigirEditor_();
   var bloqueo = LockService.getScriptLock();
   bloqueo.waitLock(30000);
   BLOQUEADO_ = true;
@@ -1529,15 +1630,53 @@ function sincronizarDrive() {
 }
 
 /** Programa la sincronización todos los días a las 6 a. m. */
+/**
+ * Lo ejecuta el activador diario. Es pública (los activadores no pueden identificarse), así que se limita a una vez cada 30 minutos
+ * y solo lee los consolidados: no devuelve datos ni acepta parámetros.
+ */
+function sincronizarDriveProgramado() {
+  var cache = typeof CacheService !== 'undefined' ? CacheService.getScriptCache() : null;
+  if (cache) { if (cache.get('ult_sinc')) return; cache.put('ult_sinc', '1', 1800); }
+  var bloqueo = LockService.getScriptLock();
+  bloqueo.waitLock(30000);
+  BLOQUEADO_ = true;
+  try {
+    var x = nucleo_();
+    var r = sincronizarDriveCon_(x.nucleo);
+    x.almacen.guardar();
+    console.log(r.informe.concat(r.errores.map(function (e) { return 'ERROR · ' + e; })).join('\n'));
+    if (r.errores.length) throw new Error(r.errores.join('\n')); // así Google avisa por correo cuando el activador falla
+  } finally { bloqueo.releaseLock(); BLOQUEADO_ = false; }
+}
+
 function instalarActivadorDiario() {
-  exigirAdminOEditor_();
-  ScriptApp.getProjectTriggers().forEach(function (t) { if (t.getHandlerFunction() === 'sincronizarDrive') ScriptApp.deleteTrigger(t); });
-  ScriptApp.newTrigger('sincronizarDrive').timeBased().everyDays(1).atHour(6).create();
+  exigirEditor_();
+  ScriptApp.getProjectTriggers().forEach(function (t) { var f = t.getHandlerFunction(); if (f === 'sincronizarDrive' || f === 'sincronizarDriveProgramado') ScriptApp.deleteTrigger(t); });
+  ScriptApp.newTrigger('sincronizarDriveProgramado').timeBased().everyDays(1).atHour(6).create();
+}
+
+/**
+ * Crea el primer administrador con usuario y contraseña (usuario «admin»). Ejecútela una vez desde el editor y copie la contraseña del registro;
+ * luego entre a la plataforma, cámbiela en «Mi cuenta» y cree desde «Accesos» a las demás personas.
+ */
+function crearAdministrador() {
+  exigirEditor_();
+  var x = nucleo_(), r = x.nucleo.crearUsuario({ nombre: 'Administrador SIAU', usuario: 'admin', rol: 'admin' });
+  console.log('Usuario: ' + r.usuario + '\nContraseña: ' + r.clave + '\n(Se muestra una sola vez. Cámbiela al entrar.)');
+  return { usuario: r.usuario, clave: r.clave };
+}
+
+/** Si olvida la contraseña del administrador: genera una nueva para el usuario «admin». */
+function reiniciarClaveAdministrador() {
+  exigirEditor_();
+  var x = nucleo_(), r = x.nucleo.restablecerClave('admin');
+  console.log('Usuario: admin\nContraseña nueva: ' + r.clave);
+  return r;
 }
 
 /** Muestra en el registro cómo quedó la instalación (sin datos personales). */
 function diagnosticar() {
-  exigirAdminOEditor_();
+  exigirEditor_();
   var p = propiedades_().getProperties(), s = [];
   ['ID_BASE', 'ID_FOTOS', 'ID_CHARLAS', 'ID_BUZON', 'ID_NPS', 'ID_MEDICA', 'ID_ILSC'].forEach(function (k) { s.push(k + ': ' + (p[k] ? 'configurado' : 'FALTA')); });
   s.push('ADMINS: ' + listaCorreos_('ADMINS').length + ' correo(s) · VISORES: ' + listaCorreos_('VISORES').length + ' correo(s)');
@@ -1553,6 +1692,7 @@ function diagnosticar() {
  * Si muestra una cuenta personal: cierre todo y repita en una ventana de incógnito con solo siau@miredips.org.
  */
 function verificarCuenta() {
+  exigirEditor_();
   var activa = '', efectiva = '';
   try { activa = String(Session.getActiveUser().getEmail() || ''); } catch (e) { activa = '(no disponible)'; }
   try { efectiva = String(Session.getEffectiveUser().getEmail() || ''); } catch (e) { efectiva = '(no disponible)'; }

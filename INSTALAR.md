@@ -1,6 +1,8 @@
 # Instalación (≈ 10 minutos, sin instalar nada)
 
-Todo corre dentro de Google con la cuenta **siau@miredips.org**: no hay servidor, claves ni contraseñas que crear. Es un proyecto **interno** (solo Calidad/SIAU): entra gente con correo @miredips.org que esté en `ADMINS`/`VISORES`.
+Todo corre dentro de Google con la cuenta **siau@miredips.org**: no hay servidor que mantener. La plataforma admite **dos formas de entrar**, que conviven:
+- **Con usuario y contraseña** (para quien no tiene cuenta institucional): las crea el administrador en la pestaña **Accesos**.
+- **Con cuenta de Google @miredips.org** que esté en `ADMINS`/`VISORES` (ver §4), si la implementación se abre a la organización.
 
 ## ⚠ Antes de empezar: use SOLO la cuenta de MiRed
 Si el navegador tiene varias cuentas de Google abiertas, Google usa la **personal** en el editor y en la implementación, y aparecen errores como «No cuentas con el permiso necesario…» o «Sin acceso».
@@ -22,7 +24,7 @@ GitHub → **Settings → Pages → Build and deployment → Source: GitHub Acti
      "timeZone": "America/Bogota",
      "runtimeVersion": "V8",
      "exceptionLogging": "STACKDRIVER",
-     "webapp": { "executeAs": "USER_DEPLOYING", "access": "DOMAIN" }
+     "webapp": { "executeAs": "USER_DEPLOYING", "access": "ANYONE_ANONYMOUS" }
    }
    ```
 4. Guarde. Elija la función **`configurar`** y pulse **Ejecutar**. Acepte los permisos (Hojas, Drive, correo). Crea la base de datos (una Hoja) y la carpeta de fotos, y busca por nombre los consolidados. Revise el registro de ejecución: cada `ID_…` debe decir **OK** (si dice REVISAR, verifique que es el archivo correcto).
@@ -32,26 +34,34 @@ GitHub → **Settings → Pages → Build and deployment → Source: GitHub Acti
 ## 3. Publicar la aplicación web
 **Implementar → Nueva implementación → Aplicación web**
 - Ejecutar como: **yo** (siau@miredips.org)
-- Quién tiene acceso: **cualquier persona de miredips.org** (la organización)
+- Quién tiene acceso: **Cualquier persona** (la plataforma pide usuario y contraseña; sin ellas no se ve ningún dato)
+
+Si la opción «Cualquier persona» no aparece, el administrador de Google Workspace debe permitir compartir fuera de la organización (Admin → Apps → Google Workspace → Drive y Docs → Uso compartido). Si ya existía una implementación «solo la organización», cree una **nueva** (la URL cambia) y use la nueva.
 
 Copie la URL `…/exec`: ese es el enlace del **visor**. El **administrador** es la misma URL con `?pagina=admin`.
 
 ## 4. Quién puede entrar
-Por defecto, solo siau@miredips.org (administrador). Para agregar personas: **⚙ Configuración → Propiedades de la secuencia de comandos**:
+**Con usuario y contraseña**
+1. En el editor (incógnito, siau@miredips.org) ejecute **`crearAdministrador`** una sola vez: en el registro de ejecución aparece el usuario `admin` y su contraseña. **Cópiela en ese momento**: no se vuelve a mostrar. Si la pierde, ejecute `reiniciarClaveAdministrador`.
+2. Entre al enlace con ese usuario → **Administrar → Accesos** → escriba el nombre de la persona y el rol (**Consulta** solo ve; **Administración** ve y edita) → **Crear acceso**. Copie la invitación (enlace, usuario y contraseña) y envíela por un canal privado.
+3. Cada persona puede cambiar su contraseña en **Mi cuenta**. Desde Accesos puede reiniciarla, desactivar o eliminar a alguien.
+4. Seguridad: 5 intentos fallidos bloquean al usuario 15 minutos; la sesión dura 6 horas; las contraseñas se guardan con sal y hash, nunca en texto.
+
+**Con cuenta de Google @miredips.org** (opcional): **⚙ Configuración → Propiedades de la secuencia de comandos**:
 
 | Propiedad | Valor |
 |---|---|
 | `ADMINS` | correos que administran, separados por coma |
 | `VISORES` | correos que solo consultan, separados por coma |
 
-Quien no esté en las listas ve «Sin acceso». Los cambios aplican de inmediato.
+Las funciones de mantenimiento (`configurar`, `sincronizarDrive`, `crearAdministrador`…) solo corren desde el editor, nunca desde el navegador.
 
 ## Al actualizar el código
 Pegue el nuevo `dist/Codigo.gs`, luego **Implementar → Administrar implementaciones → ✏ → Versión nueva**. La URL no cambia. Los datos no se tocan.
 
 ## Diagnóstico
 Ejecute **`diagnosticar`**: lista qué está configurado, cuántos activadores hay y la URL.
-Si el administrador muestra «No se pudo abrir», revise que la implementación sea «Ejecutar como yo» y que el usuario esté en `ADMINS`/`VISORES`.
+Si el administrador muestra «No se pudo abrir», revise que la implementación sea «Ejecutar como yo» y «Cualquier persona».
 
 ## Alternativa: enlazar con GitHub (clasp), como el proyecto de PQRS
 Evita copiar y pegar. Desde su computador, en la carpeta del repositorio:

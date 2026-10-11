@@ -78,7 +78,11 @@ function sembrarRotacion(almacen) {
   }
 }
 
-export function crearNucleo({ almacen, fotos, hoy = () => new Date().toLocaleDateString("sv"), ahora = () => new Date().toISOString().replace("T", " ").slice(0, 19) }) {
+/**
+ * seguridad (opcional; sin ella no hay acceso con usuario y contraseña):
+ *   hash(clave, sal) → texto (derivación lenta) · resumen(texto) → texto (rápido) · azar(bytes) → hex · kv: { get(k), put(k, v, segundos), del(k) } (sesiones e intentos)
+ */
+export function crearNucleo({ almacen, fotos, hoy = () => new Date().toLocaleDateString("sv"), ahora = () => new Date().toISOString().replace("T", " ").slice(0, 19), seguridad = null }) {
   const T = (n) => almacen.tabla(n);
   const ajuste = (k, d = "") => T("ajustes").todos().find((a) => a.id === k)?.valor ?? d;
   const setAjuste = (k, v) => { const t = T("ajustes"); if (t.todos().some((a) => a.id === k)) t.actualizar(k, { valor: String(v) }); else t.insertar({ id: k, valor: String(v) }); };
@@ -307,9 +311,69 @@ export function crearNucleo({ almacen, fotos, hoy = () => new Date().toLocaleDat
     return { mes, tecnicos, sin_cobertura: cumplimiento(mes).siau.sin_cobertura, sin_reconocer: [...conteo].map(([t, n]) => ({ t, n })).sort((a, b) => b.n - a.n) };
   }
 
+  // ───────── Acceso con usuario y contraseña (para quien no tiene cuenta de Google de la organización)
+  const ALFABETO = "abcdefghjkmnpqrstuvwxyz23456789", MSG_LOGIN = "Usuario o contraseña incorrectos.", SESION_SEG = 6 * 3600, MAX_INTENTOS = 5, BLOQUEO_SEG = 900;
+  const ROLES_ACCESO = ["visor", "admin"];
+  const normUsuario = (s) => String(s ?? "").trim().toLowerCase().replace(/[^a-z0-9._-]/g, "");
+  const iguales = (a, b) => { a = String(a); b = String(b); if (a.length !== b.length) return false; let r = 0; for (let i = 0; i < a.length; i++) r |= a.charCodeAt(i) ^ b.charCodeAt(i); return r === 0; };
+  const seg = () => { if (!seguridad) throw new ErrorHttp(501, "El acceso con usuario y contraseña no está disponible."); return seguridad; };
+  const claveNueva = () => { const h = seg().azar(16); let c = ""; for (let i = 0; i < 14; i++) c += ALFABETO[parseInt(h.slice(2 * i, 2 * i + 2), 16) % ALFABETO.length]; return c; };
+  const publico = (u) => ({ id: u.id, usuario: u.usuario, nombre: u.nombre, rol: u.rol, activo: Number(u.activo), creado: u.creado });
+  const usuarioDe = (u) => ({ email: u.usuario, nombre: u.nombre, rol: u.rol, via: "clave", id: u.id });
+
+  /** Crea una persona con acceso por contraseña. Devuelve la contraseña generada (única vez que se ve). */
+  function crearUsuario({ nombre, usuario, rol = "visor" }) {
+    const S = seg(), nom = txt(nombre, 120, true);
+    if (!ROLES_ACCESO.includes(rol)) throw bad("Rol inválido");
+    const tabla = T("usuarios"), usados = new Set(tabla.todos().map((u) => u.usuario));
+    let id_ = normUsuario(usuario);
+    if (!id_) { const p = normalizar(nom).split(" ").filter(Boolean); id_ = normUsuario(p.length > 1 ? `${p[0]}.${p[1]}` : p[0]) || "usuario"; }
+    if (id_.length < 3 || id_.length > 40) throw bad("El usuario debe tener entre 3 y 40 caracteres (letras, números, punto, guion).");
+    if (usados.has(id_)) { if (usuario) throw bad("Ese usuario ya existe"); let n = 2; while (usados.has(`${id_}${n}`)) n++; id_ = `${id_}${n}`; }
+    const clave = claveNueva(), sal = S.azar(16);
+    const id = tabla.insertar({ usuario: id_, nombre: nom, rol, activo: 1, sal, hash: S.hash(clave, sal), creado: ahora() });
+    return { id, usuario: id_, nombre: nom, rol, clave };
+  }
+
+  function iniciarSesion(b) {
+    const S = seg(), usuario = normUsuario(b.usuario), clave = String(b.clave ?? "");
+    if (!usuario || !clave || clave.length > 200) throw new ErrorHttp(401, MSG_LOGIN);
+    const kInt = "i:" + usuario, intentos = Number(S.kv.get(kInt) ?? 0);
+    if (intentos >= MAX_INTENTOS) throw new ErrorHttp(429, "Demasiados intentos fallidos. Espere 15 minutos o pida que restablezcan su contraseña.");
+    const u = T("usuarios").todos().find((x) => x.usuario === usuario);
+    const h = S.hash(clave, u ? u.sal : "sal-ficticia-para-igualar-el-tiempo"); // se calcula siempre: tarda lo mismo exista o no el usuario
+    if (!u || !Number(u.activo) || !iguales(h, u.hash)) { S.kv.put(kInt, String(intentos + 1), BLOQUEO_SEG); throw new ErrorHttp(401, MSG_LOGIN); }
+    S.kv.del(kInt);
+    const token = S.azar(24);
+    S.kv.put("s:" + S.resumen(token), JSON.stringify({ id: u.id }), SESION_SEG);
+    return { token, rol: u.rol, nombre: u.nombre, usuario: u.usuario };
+  }
+
+  /** Token de sesión → { email, nombre, rol, via } o null (vencido, cerrado o usuario desactivado). */
+  function identificar(token) {
+    if (!seguridad || typeof token !== "string" || token.length < 20 || token.length > 200) return null;
+    const v = seguridad.kv.get("s:" + seguridad.resumen(token));
+    if (!v) return null;
+    const u = T("usuarios").todos().find((x) => x.id === JSON.parse(v).id);
+    return u && Number(u.activo) ? usuarioDe(u) : null;
+  }
+
+  function cambiarClave(usuario, b) {
+    const S = seg();
+    if (usuario?.via !== "clave") throw bad("Su cuenta entra con Google: la contraseña no aplica.");
+    const u = T("usuarios").todos().find((x) => x.id === usuario.id), nueva = String(b.nueva ?? "");
+    if (!u || !iguales(S.hash(String(b.actual ?? ""), u.sal), u.hash)) throw new ErrorHttp(401, "La contraseña actual no es correcta.");
+    if (nueva.length < 10 || nueva.length > 100) throw bad("La contraseña nueva debe tener al menos 10 caracteres.");
+    const sal = S.azar(16);
+    almacen.atomico(() => T("usuarios").actualizar(u.id, { sal, hash: S.hash(nueva, sal) }));
+    almacen.guardar();
+    return { ok: true };
+  }
+
   // ───────── Enrutador
   function exigir(usuario, nivel) {
     const rol = usuario?.rol;
+    if (!usuario?.email) throw new ErrorHttp(401, "Inicie sesión para continuar.");
     if (nivel === "admin" ? rol !== "admin" : !["admin", "visor"].includes(rol)) throw new ErrorHttp(403, nivel === "admin" ? "Solo los administradores pueden hacer esto." : "No tiene acceso a esta plataforma. Pida que agreguen su correo.");
   }
 
@@ -317,7 +381,10 @@ export function crearNucleo({ almacen, fotos, hoy = () => new Date().toLocaleDat
   function manejar(req, usuario) {
     const m = req.metodo, p = req.ruta, q = req.q ?? {}, b = req.cuerpo ?? {};
     let r;
-    if (m === "GET" && p === "/api/sesion") return { rol: usuario?.rol ?? null, email: usuario?.email ?? "" };
+    if (m === "GET" && p === "/api/sesion") return { rol: usuario?.rol ?? null, email: usuario?.email ?? "", nombre: usuario?.nombre ?? "", via: usuario?.via ?? (usuario?.email ? "google" : null), clave_disponible: Boolean(seguridad) };
+    if (m === "POST" && p === "/api/login") return iniciarSesion(b);
+    if (m === "POST" && p === "/api/logout") { if (seguridad && typeof req.token === "string") seguridad.kv.del("s:" + seguridad.resumen(req.token)); return { ok: true }; }
+    if (m === "POST" && p === "/api/clave") { exigir(usuario, "visor"); return cambiarClave(usuario, b); }
 
     if (m === "GET" && p === "/api/config") { exigir(usuario, "visor"); return config(); }
     if (m === "GET" && p === "/api/evidencias") { exigir(usuario, "visor"); return listarEvidencias(q); }
@@ -394,8 +461,36 @@ export function crearNucleo({ almacen, fotos, hoy = () => new Date().toLocaleDat
     });
     if ((r = /^\/api\/admin\/ausencias\/(\d+)$/.exec(p)) && m === "DELETE") return escribir(() => { T("ausencias").borrar(Number(r[1])); return { ok: true }; });
     if (m === "POST" && p === "/api/admin/importar") return escribir(() => sincronizar(b));
+
+    if (m === "GET" && p === "/api/admin/usuarios") return T("usuarios").todos().map(publico).sort((a, c) => enOrden(a.nombre, c.nombre));
+    if (m === "POST" && p === "/api/admin/usuarios") return escribir(() => crearUsuario(b));
+    if ((r = /^\/api\/admin\/usuarios\/(\d+)$/.exec(p))) {
+      const id = Number(r[1]), u = T("usuarios").todos().find((x) => x.id === id);
+      if (!u) throw new ErrorHttp(404, "No existe");
+      const yo = usuario.via === "clave" && usuario.id === id;
+      if (m === "PUT") return escribir(() => {
+        const parche = {}, salida = { ok: true };
+        if (b.nombre) parche.nombre = txt(b.nombre, 120);
+        if (b.rol != null) { if (!ROLES_ACCESO.includes(b.rol)) throw bad("Rol inválido"); if (yo && b.rol !== "admin") throw bad("No puede quitarse a sí mismo el rol de administrador."); parche.rol = b.rol; }
+        if (b.activo != null) { if (yo && !b.activo) throw bad("No puede desactivar su propia cuenta."); parche.activo = Number(Boolean(b.activo)); }
+        if (b.reiniciar) { const S = seg(), clave = claveNueva(), sal = S.azar(16); parche.sal = sal; parche.hash = S.hash(clave, sal); salida.clave = clave; }
+        T("usuarios").actualizar(id, parche);
+        return salida;
+      });
+      if (m === "DELETE") return escribir(() => { if (yo) throw bad("No puede eliminar su propia cuenta."); T("usuarios").borrar(id); return { ok: true }; });
+    }
     throw new ErrorHttp(404, "No encontrado");
   }
 
-  return { manejar, sincronizar: (b) => { const x = sincronizar(b); almacen.guardar(); return x; }, estado, cumplimiento };
+  /** Uso interno (editor de Apps Script): nueva contraseña para una persona. */
+  function restablecerClave(usuario) {
+    const S = seg(), u = T("usuarios").todos().find((x) => x.usuario === normUsuario(usuario));
+    if (!u) throw new ErrorHttp(404, "No existe ese usuario");
+    const clave = claveNueva(), sal = S.azar(16);
+    almacen.atomico(() => T("usuarios").actualizar(u.id, { sal, hash: S.hash(clave, sal), activo: 1 }));
+    almacen.guardar();
+    return { usuario: u.usuario, clave };
+  }
+
+  return { manejar, identificar, restablecerClave, crearUsuario: (d) => { const x = almacen.atomico(() => crearUsuario(d)); almacen.guardar(); return x; }, sincronizar: (b) => { const x = sincronizar(b); almacen.guardar(); return x; }, estado, cumplimiento };
 }
