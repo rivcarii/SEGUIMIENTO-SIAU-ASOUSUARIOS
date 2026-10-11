@@ -66,7 +66,7 @@ function entorno({ usuario = "siau@miredips.org", dueno = "siau@miredips.org", p
     Utilities: {
       base64Decode: (s) => Buffer.from(s, "base64"), base64Encode: (b) => Buffer.from(b).toString("base64"),
       newBlob: (bytes, tipo, nombre) => ({ bytes, tipo, nombre, getBytes: () => (typeof bytes === "string" ? Buffer.from(bytes) : bytes) }),
-      computeHmacSha256Signature: (v, k) => createHmac("sha256", k).update(v).digest(),
+      computeHmacSha256Signature: (v, k) => { if ((typeof v === "string") !== (typeof k === "string")) throw new Error(`Los parámetros (${typeof v === "string" ? "String" : "number[]"},${typeof k === "string" ? "String" : "number[]"}) no coinciden con la firma de método de Utilities.computeHmacSha256Signature.`); return createHmac("sha256", k).update(v).digest(); },
       computeDigest: (_, t) => createHash("sha256").update(t).digest(), DigestAlgorithm: { SHA_256: "SHA_256" }, getUuid: () => randomUUID(),
       formatDate: (d, _z, fmt) => (fmt === "yyyy-MM-dd" ? "2026-09-30" : "2026-09-30 12:00:00"),
     },

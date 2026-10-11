@@ -209,8 +209,8 @@ function seguridad_() {
   if (!cache) return null;
   return {
     hash: function (clave, sal) {
-      var h = Utilities.newBlob(String(clave)).getBytes();
-      for (var i = 0; i < 150; i++) h = Utilities.computeHmacSha256Signature(h, String(sal));
+      var h = Utilities.newBlob(String(clave)).getBytes(), k = Utilities.newBlob(String(sal)).getBytes(); // Apps Script exige valor y llave del mismo tipo (bytes, bytes)
+      for (var i = 0; i < 150; i++) h = Utilities.computeHmacSha256Signature(h, k);
       return Utilities.base64Encode(h);
     },
     resumen: function (t) { return Utilities.base64Encode(Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, String(t))); },
