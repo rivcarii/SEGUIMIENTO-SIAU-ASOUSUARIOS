@@ -482,7 +482,12 @@ function instalarActivadorDiario() {
  */
 function crearAdministrador() {
   exigirEditor_();
-  var x = nucleo_(), r = x.nucleo.crearUsuario({ nombre: 'Administrador SIAU', usuario: 'admin', rol: 'admin' });
+  var x = nucleo_(), r;
+  try { r = x.nucleo.crearUsuario({ nombre: 'Administrador SIAU', usuario: 'admin', rol: 'admin' }); }
+  catch (e) { // si «admin» ya existe (se ejecutó antes), se le genera una contraseña nueva
+    if (!/ya existe/.test(String(e && e.message))) throw e;
+    r = x.nucleo.restablecerClave('admin');
+  }
   console.log('Usuario: ' + r.usuario + '\nContraseña: ' + r.clave + '\n(Se muestra una sola vez. Cámbiela al entrar.)');
   return { usuario: r.usuario, clave: r.clave };
 }

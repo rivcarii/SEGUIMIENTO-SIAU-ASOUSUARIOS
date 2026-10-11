@@ -334,3 +334,9 @@ test("activador programado: lee los consolidados como máximo una vez cada 30 mi
   e.ctx.sincronizarDriveProgramado();
   assert.equal(e.logs.length, primera); // segunda llamada seguida: no hace nada
 });
+
+test("crearAdministrador repetido no falla: genera contraseña nueva para «admin»", () => {
+  const e = entorno({ cache: true }); e.ctx.configurar();
+  const a = e.ctx.crearAdministrador(), b = e.ctx.crearAdministrador();
+  assert.equal(b.usuario, "admin"); assert.notEqual(a.clave, b.clave); assert.match(b.clave, /^[a-km-np-z2-9]{14}$/);
+});
