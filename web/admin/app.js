@@ -2,7 +2,7 @@ import { abrirLibro } from "../shared/xlsx.js";
 import { prepararLibro, ETIQUETAS } from "../shared/preparar.js";
 import { selectorMes, selectorFecha } from "../shared/selectores.js";
 import { formEvidencia } from "../shared/formevidencia.js";
-import { pantallaIngreso, pintarSesion } from "../shared/ingreso.js";
+import { pantallaIngreso, pantallaCambioObligado, pintarSesion } from "../shared/ingreso.js";
 import { api, h, alSesionVencida, fechaHoy, fmtFecha, mesActual, opciones, pintarMarca, mascota, tituloGrande } from "../shared/comun.js";
 
 const app = document.getElementById("app");
@@ -21,6 +21,7 @@ async function iniciar() {
   try { s = await api("/api/sesion"); cfg = s.rol === "admin" ? await api("/api/config") : null; }
   catch (e) { return app.replaceChildren(h("div", { class: "login" }, mascota("celular", 170), h("div", { class: "card" }, h("h2", {}, "No se pudo abrir"), h("p", {}, e.message)))); }
   if (!s.rol) return pedirIngreso();
+  if (s.debe_cambiar) return app.replaceChildren(pantallaCambioObligado(s, () => iniciar()));
   if (s.rol !== "admin") return app.replaceChildren(h("div", { class: "login" }, mascota("atento", 170), h("div", { class: "card" }, h("h2", {}, "Solo para administradores"), h("p", {}, "Su usuario puede consultar la plataforma pero no administrarla."),
     h("p", {}, h("a", { class: "btn", href: window.PLATAFORMA.app, target: "_top" }, "Ir al visor")))));
   pintarMarca(cfg.marca);
@@ -198,12 +199,13 @@ iniciar();
 // ---- Accesos: personas que entran con usuario y contraseña (sin cuenta de Google de la organización)
 async function accesos(cont) {
   const msg = h("div"), lista = h("div"), nombre = h("input", { type: "text", placeholder: "Nombre completo", autocomplete: "off" }), usuario = h("input", { type: "text", placeholder: "Usuario (opcional)", autocomplete: "off", autocapitalize: "none" });
+  const clave = h("input", { type: "text", placeholder: "Temporal (vacío = se genera)", autocomplete: "off", spellcheck: false });
   const rol = h("select", {}, h("option", { value: "visor" }, "Consulta (solo ve)"), h("option", { value: "admin" }, "Administración (ve y edita)"));
   const invitacion = (u, clave) => `Plataforma de evidencias SIAU · MiRed IPS\nEnlace: ${window.PLATAFORMA.app}\nUsuario: ${u}\nContraseña: ${clave}\nPuede cambiarla en «Mi cuenta» después de entrar.`;
   const mostrarCredencial = (u, clave, titulo) => {
     const copiar = h("button", { class: "btn sec", onclick: async () => { try { await navigator.clipboard.writeText(invitacion(u, clave)); copiar.textContent = "¡Copiado!"; } catch { copiar.textContent = "No se pudo copiar"; } setTimeout(() => { copiar.textContent = "Copiar invitación"; }, 2000); } }, "Copiar invitación");
     msg.replaceChildren(h("div", { class: "credencial", role: "status" }, h("b", {}, titulo), h("dl", {}, h("dt", {}, "Usuario"), h("dd", {}, u), h("dt", {}, "Contraseña"), h("dd", {}, clave)),
-      h("p", { class: "mut", style: "margin:8px 0" }, "Anótela ahora: por seguridad no se vuelve a mostrar. Si se pierde, reinicie la contraseña."), copiar));
+      h("p", { class: "mut", style: "margin:8px 0" }, "Anótela ahora: no se vuelve a mostrar. Deberá cambiarla al primer ingreso; si se pierde, reinicie la contraseña."), copiar));
   };
   async function cargar() {
     let us;
@@ -218,12 +220,12 @@ async function accesos(cont) {
   const crear = h("button", { class: "btn", onclick: async () => {
     if (!nombre.value.trim()) return aviso(msg, false, "Escriba el nombre de la persona.");
     crear.disabled = true;
-    try { const r = await api("/api/admin/usuarios", { json: { nombre: nombre.value, usuario: usuario.value, rol: rol.value } }); mostrarCredencial(r.usuario, r.clave, "Acceso creado para " + r.nombre); nombre.value = usuario.value = ""; cargar(); }
+    try { const r = await api("/api/admin/usuarios", { json: { nombre: nombre.value, usuario: usuario.value, rol: rol.value, clave: clave.value.trim() } }); mostrarCredencial(r.usuario, r.clave, "Acceso creado para " + r.nombre); nombre.value = usuario.value = clave.value = ""; cargar(); }
     catch (e) { aviso(msg, false, e.message); }
     crear.disabled = false;
   } }, "Crear acceso");
   cont.replaceChildren(msg, h("div", { class: "card" }, h("h3", {}, "Dar acceso a una persona"),
-    h("p", { class: "mut" }, "Se genera una contraseña de 14 caracteres que usted entrega a la persona. Quien tenga rol «Consulta» solo ve la plataforma; no puede cambiar nada."),
-    h("div", { class: "row" }, h("div", {}, h("label", {}, "Nombre"), nombre), h("div", {}, h("label", {}, "Usuario"), usuario), h("div", {}, h("label", {}, "Rol"), rol)), h("p", {}, crear)), lista);
+    h("p", { class: "mut" }, "Usted entrega a la persona una contraseña temporal (escríbala o deje el campo vacío para que se genere una). Quien tenga rol «Consulta» solo ve la plataforma; no puede cambiar nada."),
+    h("div", { class: "row" }, h("div", {}, h("label", {}, "Nombre"), nombre), h("div", {}, h("label", {}, "Usuario"), usuario), h("div", {}, h("label", {}, "Rol"), rol), h("div", {}, h("label", {}, "Contraseña temporal"), clave)), h("p", { class: "mut" }, "Mínimo 8 caracteres con letras y números. La persona deberá cambiarla al primer ingreso."), h("p", {}, crear)), lista);
   cargar();
 }

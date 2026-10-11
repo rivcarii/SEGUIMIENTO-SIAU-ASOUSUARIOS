@@ -43,7 +43,7 @@ Copie la URL `…/exec`: ese es el enlace del **visor**. El **administrador** es
 ## 4. Quién puede entrar
 **Con usuario y contraseña**
 1. En el editor (incógnito, siau@miredips.org) ejecute **`crearAdministrador`** una sola vez: en el registro de ejecución aparece el usuario `admin` y su contraseña. **Cópiela en ese momento**: no se vuelve a mostrar. Si la pierde, ejecute `reiniciarClaveAdministrador`.
-2. Entre al enlace con ese usuario → **Administrar → Accesos** → escriba el nombre de la persona y el rol (**Consulta** solo ve; **Administración** ve y edita) → **Crear acceso**. Copie la invitación (enlace, usuario y contraseña) y envíela por un canal privado.
+2. Entre al enlace con ese usuario → **Administrar → Accesos** → escriba el nombre de la persona y el rol (**Consulta** solo ve; **Administración** ve y edita) → **Crear acceso**. Escriba una contraseña temporal (mínimo 8 caracteres, con letras y números) o déjela vacía para que se genere. Copie la invitación (enlace, usuario y contraseña) y envíela por un canal privado. La persona deberá cambiarla en su primer ingreso.
 3. Cada persona puede cambiar su contraseña en **Mi cuenta**. Desde Accesos puede reiniciarla, desactivar o eliminar a alguien.
 4. Seguridad: 5 intentos fallidos bloquean al usuario 15 minutos; la sesión dura 6 horas; las contraseñas se guardan con sal y hash, nunca en texto.
 

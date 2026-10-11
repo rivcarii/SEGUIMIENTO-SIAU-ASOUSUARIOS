@@ -4,7 +4,7 @@ import { vistaPanel } from "./panel.js";
 import { vistaConsultas } from "./consultas.js";
 import { vistaFototeca } from "./fototeca.js";
 import { cargarFicha } from "./ficha.js";
-import { pantallaIngreso, pintarSesion } from "../shared/ingreso.js";
+import { pantallaIngreso, pantallaCambioObligado, pintarSesion } from "../shared/ingreso.js";
 import { construirReporte, descargarReporte } from "../shared/reporte.js";
 
 const app = document.getElementById("app"), dlg = document.getElementById("dlg"), dlgc = document.getElementById("dlgc"), tabbar = document.getElementById("tabbar");
@@ -28,6 +28,7 @@ async function iniciar() {
   try { sesion = await api("/api/sesion"); }
   catch (e) { return app.replaceChildren(h("div", { class: "login" }, mascota("atento", 170), h("div", { class: "card" }, h("h2", {}, "No se pudo abrir"), h("p", {}, e.message)))); }
   if (!sesion.rol) return pedirIngreso();
+  if (sesion.debe_cambiar) return app.replaceChildren(pantallaCambioObligado(sesion, () => iniciar()));
   S.rol = sesion.rol;
   try { S.cfg = await api("/api/config"); }
   catch (e) { return app.replaceChildren(h("div", { class: "login" }, mascota("atento", 170), h("div", { class: "card" }, h("h2", {}, "No se pudo abrir"), h("p", {}, e.message)))); }

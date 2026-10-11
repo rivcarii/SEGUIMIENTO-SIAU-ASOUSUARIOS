@@ -23,22 +23,32 @@ export function pantallaIngreso({ alEntrar, aviso = "", mensajeRol = null }) {
   return h("div", { class: "login" }, mascota("bienvenida", 170), form);
 }
 
-/** Diálogo «Mi cuenta»: cambiar la contraseña. */
-export function abrirCuenta(sesion) {
-  const dlg = h("dialog", { class: "cuenta-dlg" });
-  const actual = h("input", { type: "password", autocomplete: "current-password", required: true }), nueva = h("input", { type: "password", autocomplete: "new-password", required: true, minLength: 10 }), otra = h("input", { type: "password", autocomplete: "new-password", required: true });
-  const msg = h("div", { "aria-live": "polite" }), btn = h("button", { class: "btn" }, "Cambiar contraseña");
-  const form = h("form", { onsubmit: async (ev) => {
+/** Formulario para cambiar la contraseña (Mi cuenta y cambio obligatorio del primer ingreso). */
+function formCambio({ alListo, obligatorio = false, alCerrar = null }) {
+  const actual = h("input", { type: "password", autocomplete: "current-password", required: true }), nueva = h("input", { type: "password", autocomplete: "new-password", required: true, minLength: 8 }), otra = h("input", { type: "password", autocomplete: "new-password", required: true });
+  const msg = h("div", { "aria-live": "polite" }), btn = h("button", { class: "btn" }, obligatorio ? "Guardar y entrar" : "Cambiar contraseña");
+  return h("form", { onsubmit: async (ev) => {
     ev.preventDefault(); msg.replaceChildren();
     if (nueva.value !== otra.value) return msg.replaceChildren(h("div", { class: "msg err" }, "Las dos contraseñas nuevas no coinciden."));
     btn.disabled = true; btn.setAttribute("aria-busy", "true");
-    try { await api("/api/clave", { json: { actual: actual.value, nueva: nueva.value } }); msg.replaceChildren(h("div", { class: "msg ok" }, "Contraseña cambiada.")); actual.value = nueva.value = otra.value = ""; }
+    try { await api("/api/clave", { json: { actual: actual.value, nueva: nueva.value } }); actual.value = nueva.value = otra.value = ""; if (alListo) return await alListo(); msg.replaceChildren(h("div", { class: "msg ok" }, "Contraseña cambiada.")); }
     catch (e) { msg.replaceChildren(h("div", { class: "msg err" }, e.message)); }
     btn.disabled = false; btn.removeAttribute("aria-busy");
-  } }, h("h2", { style: "margin:0 0 4px" }, "Mi cuenta"), h("p", { class: "mut", style: "margin:0 0 10px" }, `${sesion.nombre || sesion.email}`),
-    h("label", {}, "Contraseña actual"), actual, h("label", {}, "Contraseña nueva (mínimo 10 caracteres)"), nueva, h("label", {}, "Repita la nueva"), otra, msg,
-    h("p", { class: "acciones" }, btn, h("button", { type: "button", class: "btn sec", onclick: () => dlg.close() }, "Cerrar")));
-  dlg.append(h("div", { class: "in" }, form));
+  } }, h("label", {}, obligatorio ? "Contraseña temporal (la que le entregaron)" : "Contraseña actual"), actual, h("label", {}, "Contraseña nueva (mínimo 8 caracteres, con letras y números)"), nueva, h("label", {}, "Repita la nueva"), otra, msg,
+    h("p", { class: "acciones" }, btn, alCerrar ? h("button", { type: "button", class: "btn sec", onclick: alCerrar }, "Cerrar") : ""));
+}
+
+/** Primer ingreso (o contraseña reiniciada): hay que reemplazar la temporal antes de usar la plataforma. */
+export function pantallaCambioObligado(sesion, alListo) {
+  const f = formCambio({ alListo, obligatorio: true });
+  const fm = h("div", { class: "ingreso card" }, h("h2", {}, "Cree su contraseña"), h("p", { class: "mut", style: "margin:0 0 12px" }, `${sesion.nombre || sesion.email}: por seguridad, cambie la contraseña temporal por una suya.`), f);
+  return h("div", { class: "login" }, mascota("bienvenida", 170), fm);
+}
+
+/** Diálogo «Mi cuenta»: cambiar la contraseña. */
+export function abrirCuenta(sesion) {
+  const dlg = h("dialog", { class: "cuenta-dlg" });
+  dlg.append(h("div", { class: "in" }, h("h2", { style: "margin:0 0 4px" }, "Mi cuenta"), h("p", { class: "mut", style: "margin:0 0 10px" }, `${sesion.nombre || sesion.email}`), formCambio({ alCerrar: () => dlg.close() })));
   dlg.addEventListener("close", () => dlg.remove()); dlg.addEventListener("click", (e) => { if (e.target === dlg) dlg.close(); });
   document.body.append(dlg); dlg.showModal();
 }

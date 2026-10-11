@@ -10,7 +10,7 @@ test("usuarios: el administrador crea una persona, recibe la contraseña una sol
   assert.equal(r.usuario, "ana.maria");
   assert.match(r.clave, /^[a-km-np-z2-9]{14}$/); // sin caracteres que se confunden (l, o, i, 0, 1)
   const lista = n.api("GET", "/api/admin/usuarios");
-  assert.deepEqual(Object.keys(lista[0]).sort(), ["activo", "creado", "id", "nombre", "rol", "usuario"]);
+  assert.deepEqual(Object.keys(lista[0]).sort(), ["activo", "creado", "debe_cambiar", "id", "nombre", "rol", "usuario"]);
   assert.ok(!JSON.stringify(n.almacen.tabla("usuarios").todos()).includes(r.clave)); // en la base solo queda la huella
   assert.equal(n.api("POST", "/api/admin/usuarios", { cuerpo: { nombre: "Ana María Pérez" } }).usuario, "ana.maria2"); // no repite
   return Promise.all([
@@ -69,16 +69,18 @@ test("sin sesión: las rutas piden iniciar sesión (401), distinto de no tener p
   await falla(() => n.api("GET", "/api/panel", { rol: "anonimo" }), 401);
   await falla(() => n.api("GET", "/api/admin/usuarios", { rol: "anonimo" }), 401);
   await falla(() => n.api("GET", "/api/config", { rol: "nadie" }), 403);
-  assert.deepEqual(n.api("GET", "/api/sesion", { rol: "anonimo" }), { rol: null, email: "", nombre: "", via: null, clave_disponible: true });
+  assert.deepEqual(n.api("GET", "/api/sesion", { rol: "anonimo" }), { rol: null, email: "", nombre: "", via: null, clave_disponible: true, debe_cambiar: false, hay_usuarios: false });
 });
 
-test("cambiar la propia contraseña: exige la actual, mínimo 10 caracteres, y no se puede dejar sin administradores a sí mismo", async () => {
+test("cambiar la propia contraseña: exige la actual, mínimo 8 caracteres con letras y números, y no se puede dejar sin administradores a sí mismo", async () => {
   const n = nuevoNucleo();
   const c = n.api("POST", "/api/admin/usuarios", { cuerpo: { nombre: "Ana Admin", rol: "admin" } });
   const yo = n.nucleo.identificar(entrar(n, c.usuario, c.clave).token);
   const cambiar = (cuerpo) => n.nucleo.manejar({ metodo: "POST", ruta: "/api/clave", cuerpo }, yo);
   await falla(() => cambiar({ actual: "mala", nueva: "una-clave-larga-1" }), 401);
   await falla(() => cambiar({ actual: c.clave, nueva: "corta" }), 400);
+  await falla(() => cambiar({ actual: c.clave, nueva: "solo-letras-aqui" }), 400); // sin números
+  await falla(() => cambiar({ actual: c.clave, nueva: c.clave }), 400); // igual a la actual
   cambiar({ actual: c.clave, nueva: "una-clave-larga-1" });
   await falla(() => entrar(n, c.usuario, c.clave), 401);
   assert.ok(entrar(n, c.usuario, "una-clave-larga-1").token);
@@ -88,4 +90,21 @@ test("cambiar la propia contraseña: exige la actual, mínimo 10 caracteres, y n
   await falla(() => admin("DELETE", "/api/admin/usuarios/" + c.id), 400);
   // alguien que entra con Google no tiene contraseña que cambiar
   await falla(() => n.api("POST", "/api/clave", { rol: "admin", cuerpo: { actual: "x", nueva: "una-clave-larga-1" } }), 400);
+});
+
+test("contraseña temporal como en PQRS: el administrador la elige, la persona debe cambiarla al entrar y reiniciar pide cambio otra vez", async () => {
+  const n = nuevoNucleo();
+  await falla(() => n.api("POST", "/api/admin/usuarios", { cuerpo: { nombre: "Ana Pérez", clave: "corta1" } }), 400);
+  await falla(() => n.api("POST", "/api/admin/usuarios", { cuerpo: { nombre: "Ana Pérez", clave: "sololetrasaqui" } }), 400);
+  const c = n.api("POST", "/api/admin/usuarios", { cuerpo: { nombre: "Ana Pérez", clave: "Temporal2026" } });
+  assert.equal(c.clave, "Temporal2026");
+  const s = entrar(n, c.usuario, "Temporal2026");
+  assert.equal(s.debe_cambiar, true);
+  const yo = n.nucleo.identificar(s.token);
+  assert.equal(n.nucleo.manejar({ metodo: "GET", ruta: "/api/sesion" }, yo).debe_cambiar, true);
+  n.nucleo.manejar({ metodo: "POST", ruta: "/api/clave", cuerpo: { actual: "Temporal2026", nueva: "MiClaveNueva9" } }, yo);
+  assert.equal(entrar(n, c.usuario, "MiClaveNueva9").debe_cambiar, false);
+  const r = n.api("PUT", "/api/admin/usuarios/" + c.id, { cuerpo: { reiniciar: true, clave: "Otra12345" } });
+  assert.equal(r.clave, "Otra12345");
+  assert.equal(entrar(n, c.usuario, "Otra12345").debe_cambiar, true);
 });

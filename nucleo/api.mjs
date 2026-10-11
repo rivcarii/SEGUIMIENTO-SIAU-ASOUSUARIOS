@@ -318,11 +318,13 @@ export function crearNucleo({ almacen, fotos, hoy = () => new Date().toLocaleDat
   const iguales = (a, b) => { a = String(a); b = String(b); if (a.length !== b.length) return false; let r = 0; for (let i = 0; i < a.length; i++) r |= a.charCodeAt(i) ^ b.charCodeAt(i); return r === 0; };
   const seg = () => { if (!seguridad) throw new ErrorHttp(501, "El acceso con usuario y contraseña no está disponible."); return seguridad; };
   const claveNueva = () => { const h = seg().azar(16); let c = ""; for (let i = 0; i < 14; i++) c += ALFABETO[parseInt(h.slice(2 * i, 2 * i + 2), 16) % ALFABETO.length]; return c; };
-  const publico = (u) => ({ id: u.id, usuario: u.usuario, nombre: u.nombre, rol: u.rol, activo: Number(u.activo), creado: u.creado });
-  const usuarioDe = (u) => ({ email: u.usuario, nombre: u.nombre, rol: u.rol, via: "clave", id: u.id });
+  const claveValida = (c) => typeof c === "string" && c.length >= 8 && c.length <= 100 && /[A-Za-z]/.test(c) && /\d/.test(c);
+  const MSG_CLAVE = "La contraseña debe tener mínimo 8 caracteres, con letras y números.";
+  const publico = (u) => ({ id: u.id, usuario: u.usuario, nombre: u.nombre, rol: u.rol, activo: Number(u.activo), creado: u.creado, debe_cambiar: Number(u.cambiar ?? 0) });
+  const usuarioDe = (u) => ({ email: u.usuario, nombre: u.nombre, rol: u.rol, via: "clave", id: u.id, debe_cambiar: Boolean(Number(u.cambiar ?? 0)) });
 
   /** Crea una persona con acceso por contraseña. Devuelve la contraseña generada (única vez que se ve). */
-  function crearUsuario({ nombre, usuario, rol = "visor" }) {
+  function crearUsuario({ nombre, usuario, rol = "visor", clave: claveDada = "", cambiar = true }) {
     const S = seg(), nom = txt(nombre, 120, true);
     if (!ROLES_ACCESO.includes(rol)) throw bad("Rol inválido");
     const tabla = T("usuarios"), usados = new Set(tabla.todos().map((u) => u.usuario));
@@ -330,8 +332,9 @@ export function crearNucleo({ almacen, fotos, hoy = () => new Date().toLocaleDat
     if (!id_) { const p = normalizar(nom).split(" ").filter(Boolean); id_ = normUsuario(p.length > 1 ? `${p[0]}.${p[1]}` : p[0]) || "usuario"; }
     if (id_.length < 3 || id_.length > 40) throw bad("El usuario debe tener entre 3 y 40 caracteres (letras, números, punto, guion).");
     if (usados.has(id_)) { if (usuario) throw bad("Ese usuario ya existe"); let n = 2; while (usados.has(`${id_}${n}`)) n++; id_ = `${id_}${n}`; }
-    const clave = claveNueva(), sal = S.azar(16);
-    const id = tabla.insertar({ usuario: id_, nombre: nom, rol, activo: 1, sal, hash: S.hash(clave, sal), creado: ahora() });
+    if (claveDada && !claveValida(claveDada)) throw bad(MSG_CLAVE);
+    const clave = claveDada || claveNueva(), sal = S.azar(16);
+    const id = tabla.insertar({ usuario: id_, nombre: nom, rol, activo: 1, sal, hash: S.hash(clave, sal), creado: ahora(), cambiar: cambiar ? 1 : 0 });
     return { id, usuario: id_, nombre: nom, rol, clave };
   }
 
@@ -346,7 +349,7 @@ export function crearNucleo({ almacen, fotos, hoy = () => new Date().toLocaleDat
     S.kv.del(kInt);
     const token = S.azar(24);
     S.kv.put("s:" + S.resumen(token), JSON.stringify({ id: u.id }), SESION_SEG);
-    return { token, rol: u.rol, nombre: u.nombre, usuario: u.usuario };
+    return { token, rol: u.rol, nombre: u.nombre, usuario: u.usuario, debe_cambiar: Boolean(Number(u.cambiar ?? 0)) };
   }
 
   /** Token de sesión → { email, nombre, rol, via } o null (vencido, cerrado o usuario desactivado). */
@@ -363,9 +366,10 @@ export function crearNucleo({ almacen, fotos, hoy = () => new Date().toLocaleDat
     if (usuario?.via !== "clave") throw bad("Su cuenta entra con Google: la contraseña no aplica.");
     const u = T("usuarios").todos().find((x) => x.id === usuario.id), nueva = String(b.nueva ?? "");
     if (!u || !iguales(S.hash(String(b.actual ?? ""), u.sal), u.hash)) throw new ErrorHttp(401, "La contraseña actual no es correcta.");
-    if (nueva.length < 10 || nueva.length > 100) throw bad("La contraseña nueva debe tener al menos 10 caracteres.");
+    if (!claveValida(nueva)) throw bad("La contraseña nueva debe tener mínimo 8 caracteres, con letras y números.");
+    if (nueva === String(b.actual)) throw bad("La contraseña nueva debe ser distinta de la actual.");
     const sal = S.azar(16);
-    almacen.atomico(() => T("usuarios").actualizar(u.id, { sal, hash: S.hash(nueva, sal) }));
+    almacen.atomico(() => T("usuarios").actualizar(u.id, { sal, hash: S.hash(nueva, sal), cambiar: 0 }));
     almacen.guardar();
     return { ok: true };
   }
@@ -381,7 +385,7 @@ export function crearNucleo({ almacen, fotos, hoy = () => new Date().toLocaleDat
   function manejar(req, usuario) {
     const m = req.metodo, p = req.ruta, q = req.q ?? {}, b = req.cuerpo ?? {};
     let r;
-    if (m === "GET" && p === "/api/sesion") return { rol: usuario?.rol ?? null, email: usuario?.email ?? "", nombre: usuario?.nombre ?? "", via: usuario?.via ?? (usuario?.email ? "google" : null), clave_disponible: Boolean(seguridad) };
+    if (m === "GET" && p === "/api/sesion") return { rol: usuario?.rol ?? null, email: usuario?.email ?? "", nombre: usuario?.nombre ?? "", via: usuario?.via ?? (usuario?.email ? "google" : null), clave_disponible: Boolean(seguridad), debe_cambiar: Boolean(usuario?.debe_cambiar), hay_usuarios: Boolean(seguridad) && T("usuarios").todos().length > 0 };
     if (m === "POST" && p === "/api/login") return iniciarSesion(b);
     if (m === "POST" && p === "/api/logout") { if (seguridad && typeof req.token === "string") seguridad.kv.del("s:" + seguridad.resumen(req.token)); return { ok: true }; }
     if (m === "POST" && p === "/api/clave") { exigir(usuario, "visor"); return cambiarClave(usuario, b); }
@@ -473,7 +477,11 @@ export function crearNucleo({ almacen, fotos, hoy = () => new Date().toLocaleDat
         if (b.nombre) parche.nombre = txt(b.nombre, 120);
         if (b.rol != null) { if (!ROLES_ACCESO.includes(b.rol)) throw bad("Rol inválido"); if (yo && b.rol !== "admin") throw bad("No puede quitarse a sí mismo el rol de administrador."); parche.rol = b.rol; }
         if (b.activo != null) { if (yo && !b.activo) throw bad("No puede desactivar su propia cuenta."); parche.activo = Number(Boolean(b.activo)); }
-        if (b.reiniciar) { const S = seg(), clave = claveNueva(), sal = S.azar(16); parche.sal = sal; parche.hash = S.hash(clave, sal); salida.clave = clave; }
+        if (b.reiniciar) {
+          if (b.clave && !claveValida(b.clave)) throw bad(MSG_CLAVE);
+          const S = seg(), clave = b.clave || claveNueva(), sal = S.azar(16); parche.sal = sal; parche.hash = S.hash(clave, sal); parche.cambiar = 1; salida.clave = clave;
+          S.kv.del("i:" + u.usuario); // si estaba bloqueado por intentos fallidos, queda libre
+        }
         T("usuarios").actualizar(id, parche);
         return salida;
       });
@@ -487,7 +495,8 @@ export function crearNucleo({ almacen, fotos, hoy = () => new Date().toLocaleDat
     const S = seg(), u = T("usuarios").todos().find((x) => x.usuario === normUsuario(usuario));
     if (!u) throw new ErrorHttp(404, "No existe ese usuario");
     const clave = claveNueva(), sal = S.azar(16);
-    almacen.atomico(() => T("usuarios").actualizar(u.id, { sal, hash: S.hash(clave, sal), activo: 1 }));
+    almacen.atomico(() => T("usuarios").actualizar(u.id, { sal, hash: S.hash(clave, sal), activo: 1, cambiar: 1 }));
+    S.kv.del("i:" + u.usuario);
     almacen.guardar();
     return { usuario: u.usuario, clave };
   }
